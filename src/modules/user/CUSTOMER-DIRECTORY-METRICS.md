@@ -1,0 +1,13 @@
+# Customer directory metrics
+
+`GET /users` and `POST /users/filter` enrich the returned customer page with:
+
+- `lastBookingAt`: ISO timestamp or null. The latest confirmed/completed reservation start at or before the read time, including ongoing visits. Future bookings, cancellations, draft/expired/failed holds and fully cancelled course places are excluded. Open-studio ownership uses `createdBy`; course ownership uses the customer's paid, processed order and remaining purchased places. The date respects the member's allowed locations and requires `bookings.view`.
+- `totalSpentByCurrency`: sorted `{ currency, amountMinor }[]`, or null when unavailable. This is locally recorded cash paid on orders, linked voucher purchases and membership invoices, minus locally recorded successful cash refunds. Credit-pack purchases count; credit/voucher/membership-credit redemption does not count again. Wallet credit refunds are not cash refunds. A failed fulfillment does not erase a captured payment.
+- `totalSpentCurrency`: the currency when there is one currency, or the validated tenant currency when there are no paid records. Multiple currencies return null. `totalSpent` is a compatibility major-unit scalar for CZK only, because older clients always label this field as CZK. Other currencies retain their authoritative array and currency but return a null scalar. No paid records returns an empty array and scalar 0 only when the tenant currency is CZK. Unknown monetary snapshots or conflicting refund evidence return null rather than a guessed total.
+
+The complete spending summary requires all-location access and `orders.view`, `payments.view`, `vouchers.view` and `memberships.view`. A restricted member gets null, not a partial lifetime total or access to otherwise hidden financial records. Directory identity/filtering remains organization-wide; the active studio never changes these identity queries.
+
+Queries are tenant-scoped and batched for the returned customer IDs. Booking dates use database aggregates; financial snapshots stream with bounded cursor batches. There are no per-customer reads, historical repair writes or provider calls. Voucher and invoice attribution requires an explicit customer ID; email matching is never used.
+
+These figures summarize stored payment evidence, not a reconciliation of all external accounts. In particular, provider-dashboard changes and membership refunds/credit notes without local refund records cannot be reconstructed here. Do not replace missing amounts with current product prices, order gross totals, credit balances or inferred exchange rates.

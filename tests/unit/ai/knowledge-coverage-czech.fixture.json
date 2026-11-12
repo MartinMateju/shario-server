@@ -1,0 +1,42 @@
+[
+  {
+    "id": "booking_price",
+    "question": "Kolik stojí rezervace studia?",
+    "answer": "Základní cena sdílené rezervace na první pobočce je 250 Kč za osobu a hodinu. Například hodina pro dvě osoby vyjde na 500 Kč. U soukromé rezervace se připočítává jednorázově 50 Kč za rezervaci; hodina pro jednu osobu tak vyjde na 300 Kč. Cenu druhé pobočky a konkrétního kurzu si ověř přímo v jejich nabídce. Před potvrzením a platbou vždy zkontroluj výslednou částku v portálu; záleží na pobočce, délce, počtu osob a režimu návštěvy."
+  },
+  {
+    "id": "booking_cancellation",
+    "question": "Jaké jsou podmínky zrušení rezervace a vrácení peněz?",
+    "answer": "U samostatné rezervace otevři v zákaznickém účtu Moje rezervace a zvol zrušení konkrétní návštěvy. Zrušení je dostupné před odesláním vstupního kódu. Zaplacená částka se vrátí jako kredit studia; pokud jsi platil/a členským kreditem, tento kredit se obnoví. Před potvrzením si přečti zobrazené podmínky. Pokud už zrušení není dostupné nebo potřebuješ řešit kurz či jiný typ objednávky, kontaktuj info@example.test."
+  },
+  {
+    "id": "booking_reschedule",
+    "question": "Mohu změnit termín své rezervace?",
+    "answer": "Ano, u samostatné rezervace použij v jejím detailu možnost změnit termín, pokud je dostupná. Vybereš nový volný začátek; délka rezervace, pobočka, aktivita a počet osob zůstávají stejné. Po vydání vstupního kódu se zákaznická změna termínu uzamkne. Pokud možnost přesunu nevidíš, napiš na info@example.test — tým může prověřit změnu budoucí rezervace podle dostupné kapacity. Změnu termínu kurzu řeš přímo s ateliérem."
+  },
+  {
+    "id": "studio_inclusions",
+    "question": "Co je zahrnuto v rezervaci studia?",
+    "answer": "Samostatná rezervace obou poboček zahrnuje studiový materiál, nástroje a výpaly. Je určená pro vlastní práci lidem, kteří znají základy keramiky; vedení lektorem si vybereš jako kurz. V ateliéru používej dostupnou studiovou hlínu a glazury. U kurzů se rozsah řídí konkrétním popisem: například začátečnické točení zahrnuje přežah a navazující kurz glazování se vybírá samostatně."
+  },
+  {
+    "id": "studio_arrival",
+    "question": "Jak se po příchodu dostanu do studia?",
+    "answer": "Přijď do pobočky uvedené v rezervaci a řiď se jejími pokyny k příchodu. Oficiální web uvádí zaslání vstupního kódu e-mailem 15 minut před začátkem. Kód je soukromý a nesdílí se s dalšími lidmi. Pokud e-mail nebo pokyny chybí, ověř detail rezervace a složku nevyžádané pošty; při potížích kontaktuj info@example.test nebo kontaktní telefon v portálu."
+  },
+  {
+    "id": "course_preparation",
+    "question": "Co si mám přinést na kurz?",
+    "answer": "Nemusíš si přinést vůbec nic — vše potřebné pro kurz dostaneš na místě, včetně materiálů a pomůcek. Vlastní zástěra není potřeba. Před návštěvou si jen ověř čas a pobočku v potvrzení konkrétního kurzu."
+  },
+  {
+    "id": "membership_usage",
+    "question": "Jak funguje členství ve studiu?",
+    "answer": "Zákaznický účet a členské ID nejsou totéž co placený členský plán. Účet slouží k rezervacím a správě návštěv; členským ID označuješ své výrobky. Aktuálně v nabídce obou poboček nejsou nové plány placeného členství. Pokud už máš starší členství nebo kredit, ověř jeho konkrétní výhody, zůstatek a podmínky ve svém účtu. Když něco není jasné, napiš na info@example.test."
+  },
+  {
+    "id": "accessibility",
+    "question": "Je studio přístupné lidem s omezenou pohyblivostí?",
+    "answer": "Ano. Obě pobočky mají bezbariérový vstup, pohyb uvnitř i WC. Pokud potřebuješ konkrétní pomoc nebo si chceš před návštěvou ověřit uspořádání pracovního místa, napiš na info@example.test nebo zavolej na kontaktní telefon v portálu."
+  }
+]

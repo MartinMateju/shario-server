@@ -1,0 +1,33 @@
+name: shario-local
+services:
+  mongo:
+    image: mongo:7
+    command: [mongod, --replSet, rs0, --bind_ip_all, --port, '27028']
+    ports:
+      - '127.0.0.1:27028:27028'
+    volumes:
+      - shario-mongo:/data/db
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          mongosh --quiet --port 27028 --eval
+          'try { rs.status() } catch (e) { rs.initiate({_id:"rs0",members:[{_id:0,host:"localhost:27028"}]}) }; if (!db.hello().isWritablePrimary) quit(1)'
+      interval: 5s
+      timeout: 10s
+      retries: 30
+  redis:
+    image: redis:7-alpine
+    command: [redis-server, --appendonly, 'yes']
+    ports:
+      - '127.0.0.1:6381:6379'
+    volumes:
+      - shario-redis:/data
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+volumes:
+  shario-mongo:
+  shario-redis:

@@ -1,0 +1,30 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "rootDir": ".",
+    "outDir": "dist",
+
+    "paths": {
+      "@/*": ["./src/*"],
+      "@/modules/*": ["./src/modules/*"],
+      "@/shared/*": ["./src/shared/*"],
+      "@/infrastructure/*": ["./src/infrastructure/*"],
+      "@/workers/*": ["./src/workers/*"],
+      "@/app/*": ["./src/app/*"],
+      "@/tests/*": ["./tests/*"]
+    },
+
+    "strict": false,
+    "allowJs": true,
+    "checkJs": false,
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "noEmitOnError": false
+  },
+  "include": ["src/**/*.ts", "src/**/*.js", "tests/**/*.ts", "tests/**/*.js"],
+  "exclude": ["node_modules", "dist", "coverage"]
+}

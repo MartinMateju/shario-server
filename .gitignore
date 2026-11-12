@@ -1,0 +1,35 @@
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
+# dependencies
+/node_modules
+/dist
+# Local migration snapshots and reports can contain customer data and hashes.
+/migration-data/
+# Old local Switzer downloads are not part of Shario; bundled Manrope is licensed in assets/fonts/manrope/.
+/assets/fonts/switzer/*.ttf
+/.pnp
+.pnp.js
+
+# testing
+/coverage
+/.ai-evals
+
+# production
+/build
+
+# misc
+.DS_Store
+.env
+.env.e2e
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+.env.*
+!.env.example
+!.env.e2e.example

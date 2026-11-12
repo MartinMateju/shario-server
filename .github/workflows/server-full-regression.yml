@@ -1,0 +1,79 @@
+name: Server full regression
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/server-full-regression.yml"
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: server-full-regression-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  regression:
+    name: Typecheck and complete coverage suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      CI: "true"
+      NODE_ENV: test
+      TZ: UTC
+      RUN_MONGO_INTEGRATION_TESTS: "true"
+      REDIS_URL: redis://127.0.0.1:6381
+      MONGOMS_DOWNLOAD_DIR: ${{ github.workspace }}/.cache/mongodb-binaries
+      OPENAI_API_KEY: ""
+
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6381:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Restore MongoDB binary cache
+        uses: actions/cache@v6
+        with:
+          path: .cache/mongodb-binaries
+          key: ${{ runner.os }}-mongodb-memory-${{ hashFiles('package-lock.json') }}
+
+      - name: Install locked dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Typecheck production sources
+        run: npm run typecheck:production
+
+      - name: Run all tests with coverage
+        run: npm run test:coverage
+
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: server-coverage-${{ github.run_id }}
+          path: coverage
+          if-no-files-found: ignore
+          retention-days: 7

@@ -1,0 +1,1 @@
+export { TenantModel as default, TenantModel } from "./tenant.schema.js";

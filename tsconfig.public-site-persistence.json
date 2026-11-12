@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.build.json",
+  "compilerOptions": {
+    "noEmit": true
+  },
+  "include": [
+    "src/modules/tenants/public-site/tenant-public-site.constants.ts",
+    "src/modules/tenants/public-site/tenant-public-site.schema.ts",
+    "src/modules/tenants/public-site/tenant-public-site.serializers.ts",
+    "src/modules/tenants/public-site/tenant-public-site.validators.ts",
+    "src/modules/tenants/tenant.types.ts"
+  ],
+  "exclude": ["node_modules", "dist", "coverage", "tests"]
+}
