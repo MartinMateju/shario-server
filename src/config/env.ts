@@ -92,7 +92,7 @@ const envSchema = z
      * Exact exceptional CORS origins separated by commas.
      *
      * Example:
-     * https://customer-domain.com,http://192.168.1.20:3000
+     * https://customer-domain.com,http://192.168.1.20:4310
      */
     CORS_ALLOWED_ORIGINS: optionalString,
 

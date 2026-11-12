@@ -137,6 +137,11 @@ const developmentRootDomain = normalizeHostname(
   process.env.DEVELOPMENT_ROOT_DOMAIN || "localhost",
 );
 
+const developmentClientOrigin = new URL(
+  normalizeConfiguredOrigin(process.env.CLIENT_URL) ||
+    "http://shario.localhost:4310",
+);
+
 const isDevelopmentFrontendHostname = (hostname: string): boolean =>
   hostname === "localhost" ||
   hostname.endsWith(".localhost") ||
@@ -148,8 +153,8 @@ const isPlatformFrontendOrigin = (url: URL): boolean => {
 
   if (
     process.env.NODE_ENV !== "production" &&
-    url.protocol === "http:" &&
-    url.port === "3000" &&
+    url.protocol === developmentClientOrigin.protocol &&
+    url.port === developmentClientOrigin.port &&
     isDevelopmentFrontendHostname(hostname)
   ) {
     return true;
@@ -245,6 +250,12 @@ export const isCorsOriginAllowed = async (
 
   if (isPlatformFrontendOrigin(url)) {
     return true;
+  }
+
+  // Development hosts must use the configured frontend protocol and port.
+  // Do not let a tenant lookup turn another local process into a trusted origin.
+  if (isDevelopmentFrontendHostname(normalizeHostname(url.hostname))) {
+    return false;
   }
 
   if (!isCustomDomainProtocolAllowed(url)) {

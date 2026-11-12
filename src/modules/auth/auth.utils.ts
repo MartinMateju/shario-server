@@ -209,9 +209,9 @@ export const getAuthenticatedUserName = (req: RequestWithUser): string => {
 |
 | Recommended development flow:
 |
-| shario.localhost:3000
-|   -> api.shario.localhost:4000
-|   -> studio-grohovka.shario.localhost:3000
+| shario.localhost:4310
+|   -> api.shario.localhost:4311
+|   -> example-space.shario.localhost:4310
 |
 | These hosts share the shario.localhost site, so the refresh cookie can use the
 | normal local-development settings SameSite=Lax and Secure=false. Flat sibling

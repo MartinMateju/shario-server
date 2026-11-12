@@ -163,3 +163,75 @@ describe("credentialed CORS origin authorization", () => {
     expect(lookup).not.toHaveBeenCalled();
   });
 });
+
+
+describe("new Shario workspace development origins", () => {
+  const loadDevelopmentCors = async ({
+    clientUrl = "http://shario.localhost:4310",
+    rootDomain = "localhost",
+  } = {}) => {
+    vi.stubEnv("NODE_ENV", "development");
+    vi.stubEnv("CLIENT_URL", clientUrl);
+    vi.stubEnv("PUBLIC_APP_URL", "");
+    vi.stubEnv("CORS_ALLOWED_ORIGINS", "");
+    vi.stubEnv("DEVELOPMENT_ROOT_DOMAIN", rootDomain);
+    vi.resetModules();
+    return import("@/config/cors-origin.js");
+  };
+
+  afterEach(() => vi.unstubAllEnvs());
+
+  it.each([
+    "http://new-space.localhost:4310",
+    "http://ws-new-space.localhost:4310",
+    "http://new-space.shario.localhost:4310",
+    "http://localhost:4310",
+  ])("allows newly registered %s without an explicit origin or tenant lookup", async (origin) => {
+    const { isCorsOriginAllowed } = await loadDevelopmentCors();
+    const lookup = vi.fn().mockResolvedValue(null);
+    await expect(isCorsOriginAllowed(origin, lookup)).resolves.toBe(true);
+    expect(lookup).not.toHaveBeenCalled();
+  });
+
+  it("defaults to Shario port 4310 when CLIENT_URL is absent", async () => {
+    const { isCorsOriginAllowed } = await loadDevelopmentCors({ clientUrl: "" });
+    const lookup = vi.fn().mockResolvedValue(null);
+    await expect(isCorsOriginAllowed("http://new-space.localhost:4310", lookup)).resolves.toBe(true);
+    expect(lookup).not.toHaveBeenCalled();
+  });
+
+  it("uses the configured client protocol, port, and development root", async () => {
+    const { isCorsOriginAllowed } = await loadDevelopmentCors({
+      clientUrl: "https://shario.workspaces.test:5443",
+      rootDomain: "workspaces.test",
+    });
+    const lookup = vi.fn().mockResolvedValue(null);
+    for (const hostname of ["new-space.workspaces.test", "ws-new-space.localhost"]) {
+      await expect(isCorsOriginAllowed(`https://${hostname}:5443`, lookup)).resolves.toBe(true);
+    }
+    expect(lookup).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    "http://new-space.localhost:3000",
+    "http://new-space.localhost:4311",
+    "https://new-space.localhost:4310",
+    "http://ws-new-space.localhost:9999",
+  ])("rejects the wrong local protocol or port even for a known tenant: %s", async (origin) => {
+    const { isCorsOriginAllowed } = await loadDevelopmentCors();
+    const lookup = vi.fn().mockResolvedValue(activeTenant);
+    await expect(isCorsOriginAllowed(origin, lookup)).resolves.toBe(false);
+    expect(lookup).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    "http://new-space.localhost.attacker.example:4310",
+    "http://untrusted.example:4310",
+    "http://notlocalhost:4310",
+  ])("does not trust an unverified hostname on the frontend port: %s", async (origin) => {
+    const { isCorsOriginAllowed } = await loadDevelopmentCors();
+    const lookup = vi.fn().mockResolvedValue(null);
+    await expect(isCorsOriginAllowed(origin, lookup)).resolves.toBe(false);
+    expect(lookup).toHaveBeenCalledOnce();
+  });
+});
