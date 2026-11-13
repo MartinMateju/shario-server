@@ -625,6 +625,8 @@ envVarGroups:
     value: production
   - key: LOG_LEVEL
     value: info
+  - key: R2_JURISDICTION
+    value: eu
   - key: COMMUNICATION_SCHEDULER_INTERVAL_MS
     value: '60000'
   - key: SHUTDOWN_DRAIN_TIMEOUT_MS

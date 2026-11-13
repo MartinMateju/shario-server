@@ -46,6 +46,7 @@ import membershipRoutes, {
   publicMembershipRouter,
 } from "@/modules/membership/routes/membership.routes.js";
 import metadataRoutes from "@/modules/metadata/routes/metadata.routes.js";
+import publicMediaRouter from "@/modules/media/public-media.routes.js";
 import moneyCreditRoutes from "@/modules/money-credit/routes/money-credit.routes.js";
 import notificationRoutes from "@/modules/notification/routes/notification.routes.js";
 import orderRoutes from "@/modules/order/order.routes.js";
@@ -96,6 +97,7 @@ export const apiRouter: Router = Router();
 registerWorkspaceNotificationPublisher();
 
 apiRouter.use("/", rootRoutes);
+apiRouter.use("/media/public", publicMediaRouter);
 
 apiRouter.use("/auth", authRoutes);
 apiRouter.use("/account", accountRoutes);

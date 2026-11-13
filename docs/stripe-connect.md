@@ -102,6 +102,9 @@ Subscribe the Connect destination to these connected-account events:
 - `invoice.payment_failed`
 - `invoice.voided`
 - `invoice.marked_uncollectible`
+- `charge.refunded`
+- `refund.updated`
+- `refund.failed`
 
 The subscription and invoice events above are required by customer Membership
 V1. Destination delivery must include events on connected accounts. Membership
@@ -111,8 +114,9 @@ metadata. A Checkout completion without `payment_status=paid` never activates a
 membership. Event claims are durable/leased and published plan terms are read
 from the stored membership snapshot, not mutable Stripe metadata.
 
-Membership V1 deliberately does not subscribe to or automatically apply refund
-or dispute events. Refunding a fixed or recurring membership charge in Stripe
+The three refund events reconcile supported booking/checkout refunds. Membership
+V1 deliberately does not automatically apply refund or dispute events to membership
+entitlements. Refunding a fixed or recurring membership charge in Stripe
 does not alter the local membership, its Subscription, or its entitlements. The
 operator must also cancel the membership through Skab (which cancels/schedules
 the connected-account Subscription where applicable) and use an audited benefit

@@ -7,6 +7,18 @@ const source = readFileSync(
 );
 
 describe("workspace route module gates", () => {
+  it("serves narrowly scoped public media before authenticated workspace routes", () => {
+    const mount = source.indexOf(
+      'apiRouter.use("/media/public", publicMediaRouter)',
+    );
+    expect(mount).toBeGreaterThan(-1);
+    expect(mount).toBeLessThan(
+      source.indexOf(
+        "apiRouter.use(verifyJWT, requireTenantSubscriptionAccess)",
+      ),
+    );
+  });
+
   const expected = [
     ["/bookings", "bookingWorkflowModule"],
     ["/users", "customersModule"],
@@ -63,4 +75,3 @@ describe("workspace route module gates", () => {
     }
   });
 });
-

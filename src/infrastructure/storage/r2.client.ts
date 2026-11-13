@@ -1,6 +1,7 @@
 import {
   DeleteObjectCommand,
   GetObjectCommand,
+  HeadObjectCommand,
   PutObjectCommand,
   S3Client,
   type GetObjectCommandOutput,
@@ -48,6 +49,9 @@ type DeleteObjectFromR2Params = {
 type GetPresignedR2UrlParams = {
   key: string;
   expiresInSeconds?: number;
+  responseContentType?: string;
+  responseContentDisposition?: string;
+  responseCacheControl?: string;
 };
 
 type UploadBufferToR2Result = {
@@ -187,9 +191,26 @@ export const getObjectBufferFromR2 = async ({
   return Buffer.concat(chunks);
 };
 
+export const getR2ObjectMetadata = async ({ key }: { key: string }) => {
+  if (!key.trim()) {
+    throw new Error("getR2ObjectMetadata: key is required");
+  }
+
+  const object = await getR2Client().send(
+    new HeadObjectCommand({ Bucket: getR2BucketName(), Key: key }),
+  );
+  return {
+    contentType: object.ContentType,
+    contentLength: object.ContentLength,
+  };
+};
+
 export const getPresignedR2Url = async ({
   key,
   expiresInSeconds = 300,
+  responseContentType,
+  responseContentDisposition,
+  responseCacheControl,
 }: GetPresignedR2UrlParams): Promise<string> => {
   if (!key.trim()) {
     throw new Error("getPresignedR2Url: key is required");
@@ -198,7 +219,19 @@ export const getPresignedR2Url = async ({
   const expiresIn = Math.min(Math.max(Math.floor(expiresInSeconds), 30), 900);
   return getSignedUrl(
     getR2Client(),
-    new GetObjectCommand({ Bucket: getR2BucketName(), Key: key }),
+    new GetObjectCommand({
+      Bucket: getR2BucketName(),
+      Key: key,
+      ...(responseContentType
+        ? { ResponseContentType: responseContentType }
+        : {}),
+      ...(responseContentDisposition
+        ? { ResponseContentDisposition: responseContentDisposition }
+        : {}),
+      ...(responseCacheControl
+        ? { ResponseCacheControl: responseCacheControl }
+        : {}),
+    }),
     { expiresIn },
   );
 };
