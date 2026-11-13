@@ -1,3 +1,4 @@
+import { aiProductText } from "../ai-product-copy.js";
 import { createHash } from "node:crypto";
 
 import {
@@ -127,10 +128,7 @@ export const extractDailyBriefingMetrics = (
     staffUpdatesNeedingOwnerAttention: has("staffPlanning")
       ? reportedOwnerAttention === null
         ? null
-        : Math.max(
-            reportedOwnerAttention - detailedBlockedOwnerAttention,
-            0,
-          )
+        : Math.max(reportedOwnerAttention - detailedBlockedOwnerAttention, 0)
       : null,
     lowStockItems: has("inventory")
       ? finiteNumber(inventory.lowStockCount)
@@ -151,21 +149,6 @@ export const extractDailyBriefingMetrics = (
     coverage,
     sourceCount: coverage.available.length,
   };
-};
-
-const isCzech = (locale: string) => locale.toLowerCase().startsWith("cs");
-
-const countLabel = (
-  count: number,
-  locale: string,
-  en: readonly [string, string],
-  cs: readonly [string, string, string],
-) => {
-  if (!isCzech(locale)) return `${count} ${count === 1 ? en[0] : en[1]}`;
-  const absolute = Math.abs(count);
-  const form =
-    absolute === 1 ? cs[0] : absolute >= 2 && absolute <= 4 ? cs[1] : cs[2];
-  return `${count} ${form}`;
 };
 
 const attentionItem = ({
@@ -192,18 +175,14 @@ export const buildDailyBriefingAttention = (
   metrics: DailyBriefingMetrics,
   locale: string,
 ): DailyBriefingAttention[] => {
-  const cs = isCzech(locale);
   const items: DailyBriefingAttention[] = [];
   const positive = (value: number | null): value is number =>
     value !== null && value > 0;
 
   if (positive(metrics.urgentConversations)) {
-    const count = countLabel(
-      metrics.urgentConversations,
-      locale,
-      ["urgent conversation", "urgent conversations"],
-      ["naléhavá konverzace", "naléhavé konverzace", "naléhavých konverzací"],
-    );
+    const count = aiProductText(locale, "briefing.message001", {
+      count: metrics.urgentConversations,
+    });
     items.push(
       attentionItem({
         id: "urgent-conversations",
@@ -211,22 +190,19 @@ export const buildDailyBriefingAttention = (
         severity: DAILY_BRIEFING_SEVERITY.CRITICAL,
         metricKey: "urgentConversations",
         value: metrics.urgentConversations,
-        title: cs ? "Naléhavé zprávy zákazníků" : "Urgent customer messages",
-        description: cs
-          ? `${count} vyžaduje pozornost.`
-          : `${count} need attention.`,
+        title: aiProductText(locale, "briefing.message002"),
+        description: aiProductText(locale, "briefing.message003", {
+          value1: count,
+        }),
         href: "/app/communications?section=inbox",
       }),
     );
   }
 
   if (positive(metrics.overdueTasks)) {
-    const count = countLabel(
-      metrics.overdueTasks,
-      locale,
-      ["overdue task", "overdue tasks"],
-      ["zpožděný úkol", "zpožděné úkoly", "zpožděných úkolů"],
-    );
+    const count = aiProductText(locale, "briefing.message004", {
+      count: metrics.overdueTasks,
+    });
     items.push(
       attentionItem({
         id: "overdue-tasks",
@@ -234,26 +210,19 @@ export const buildDailyBriefingAttention = (
         severity: DAILY_BRIEFING_SEVERITY.CRITICAL,
         metricKey: "overdueTasks",
         value: metrics.overdueTasks,
-        title: cs ? "Zpožděné úkoly týmu" : "Overdue studio tasks",
-        description: cs
-          ? `${count} čeká na dokončení.`
-          : `${count} are waiting to be completed.`,
+        title: aiProductText(locale, "briefing.message005"),
+        description: aiProductText(locale, "briefing.message006", {
+          value1: count,
+        }),
         href: "/app/operations?section=tasks",
       }),
     );
   }
 
   if (positive(metrics.blockedStaffUpdates)) {
-    const count = countLabel(
-      metrics.blockedStaffUpdates,
-      locale,
-      ["staff update reporting a blocker", "staff updates reporting blockers"],
-      [
-        "aktualizace týmu s hlášenou blokací",
-        "aktualizace týmu s hlášenou blokací",
-        "aktualizací týmu s hlášenou blokací",
-      ],
-    );
+    const count = aiProductText(locale, "briefing.message007", {
+      count: metrics.blockedStaffUpdates,
+    });
     items.push(
       attentionItem({
         id: "blocked-staff-updates",
@@ -261,22 +230,19 @@ export const buildDailyBriefingAttention = (
         severity: DAILY_BRIEFING_SEVERITY.CRITICAL,
         metricKey: "blockedStaffUpdates",
         value: metrics.blockedStaffUpdates,
-        title: cs ? "Blokace týmu" : "Staff blockers",
-        description: cs
-          ? `${count} vyžaduje pomoc.`
-          : `${count} need help.`,
+        title: aiProductText(locale, "briefing.message008"),
+        description: aiProductText(locale, "briefing.message009", {
+          value1: count,
+        }),
         href: "/app/operations?section=tasks",
       }),
     );
   }
 
   if (positive(metrics.urgentTasks)) {
-    const count = countLabel(
-      metrics.urgentTasks,
-      locale,
-      ["urgent task", "urgent tasks"],
-      ["naléhavý úkol", "naléhavé úkoly", "naléhavých úkolů"],
-    );
+    const count = aiProductText(locale, "briefing.message010", {
+      count: metrics.urgentTasks,
+    });
     items.push(
       attentionItem({
         id: "urgent-tasks",
@@ -284,26 +250,19 @@ export const buildDailyBriefingAttention = (
         severity: DAILY_BRIEFING_SEVERITY.WARNING,
         metricKey: "urgentTasks",
         value: metrics.urgentTasks,
-        title: cs ? "Naléhavé úkoly" : "Urgent tasks",
-        description: cs
-          ? `${count} má vysokou prioritu.`
-          : `${count} are marked high priority.`,
+        title: aiProductText(locale, "briefing.message011"),
+        description: aiProductText(locale, "briefing.message012", {
+          value1: count,
+        }),
         href: "/app/operations?section=tasks",
       }),
     );
   }
 
   if (positive(metrics.unpaidBookings)) {
-    const count = countLabel(
-      metrics.unpaidBookings,
-      locale,
-      ["unpaid booking", "unpaid bookings"],
-      [
-        "nezaplacená rezervace",
-        "nezaplacené rezervace",
-        "nezaplacených rezervací",
-      ],
-    );
+    const count = aiProductText(locale, "briefing.message013", {
+      count: metrics.unpaidBookings,
+    });
     items.push(
       attentionItem({
         id: "unpaid-bookings",
@@ -311,26 +270,19 @@ export const buildDailyBriefingAttention = (
         severity: DAILY_BRIEFING_SEVERITY.WARNING,
         metricKey: "unpaidBookings",
         value: metrics.unpaidBookings,
-        title: cs ? "Nezaplacené rezervace" : "Unpaid bookings",
-        description: cs
-          ? `${count} vyžaduje kontrolu.`
-          : `${count} need review.`,
+        title: aiProductText(locale, "briefing.message014"),
+        description: aiProductText(locale, "briefing.message015", {
+          value1: count,
+        }),
         href: "/app/bookings",
       }),
     );
   }
 
   if (positive(metrics.lowStockItems)) {
-    const count = countLabel(
-      metrics.lowStockItems,
-      locale,
-      ["low-stock item", "low-stock items"],
-      [
-        "položka s nízkou zásobou",
-        "položky s nízkou zásobou",
-        "položek s nízkou zásobou",
-      ],
-    );
+    const count = aiProductText(locale, "briefing.message016", {
+      count: metrics.lowStockItems,
+    });
     items.push(
       attentionItem({
         id: "low-stock-items",
@@ -338,22 +290,19 @@ export const buildDailyBriefingAttention = (
         severity: DAILY_BRIEFING_SEVERITY.WARNING,
         metricKey: "lowStockItems",
         value: metrics.lowStockItems,
-        title: cs ? "Nízké zásoby" : "Low inventory",
-        description: cs
-          ? `${count} může vyžadovat doplnění.`
-          : `${count} may need replenishment.`,
+        title: aiProductText(locale, "briefing.message017"),
+        description: aiProductText(locale, "briefing.message018", {
+          value1: count,
+        }),
         href: "/app/operations?section=inventory",
       }),
     );
   }
 
   if (positive(metrics.staffUpdatesNeedingOwnerAttention)) {
-    const count = countLabel(
-      metrics.staffUpdatesNeedingOwnerAttention,
-      locale,
-      ["staff update", "staff updates"],
-      ["aktualizace týmu", "aktualizace týmu", "aktualizací týmu"],
-    );
+    const count = aiProductText(locale, "briefing.message019", {
+      count: metrics.staffUpdatesNeedingOwnerAttention,
+    });
     items.push(
       attentionItem({
         id: "staff-updates-owner-attention",
@@ -361,10 +310,10 @@ export const buildDailyBriefingAttention = (
         severity: DAILY_BRIEFING_SEVERITY.WARNING,
         metricKey: "staffUpdatesNeedingOwnerAttention",
         value: metrics.staffUpdatesNeedingOwnerAttention,
-        title: cs ? "Aktualizace týmu k prověření" : "Staff updates to review",
-        description: cs
-          ? `${count} vyžaduje pozornost vedoucího.`
-          : `${count} need owner attention.`,
+        title: aiProductText(locale, "briefing.message020"),
+        description: aiProductText(locale, "briefing.message021", {
+          value1: count,
+        }),
         href: "/app/operations?section=tasks",
       }),
     );
@@ -379,10 +328,8 @@ export const buildDailyBriefingAttention = (
         severity: DAILY_BRIEFING_SEVERITY.INFO,
         metricKey: "coverage",
         value: count || null,
-        title: cs ? "Částečné pokrytí dat" : "Partial data coverage",
-        description: cs
-          ? "Některé zdroje nejsou dostupné; jejich hodnoty nejsou vykázány jako nula."
-          : "Some sources are unavailable; their values are not reported as zero.",
+        title: aiProductText(locale, "briefing.message022"),
+        description: aiProductText(locale, "briefing.message023"),
         href: null,
       }),
     );
@@ -396,49 +343,32 @@ export const buildDeterministicBriefingNarrative = (
   attention: DailyBriefingAttention[],
   locale: string,
 ): DailyBriefingNarrative => {
-  const cs = isCzech(locale);
   const actionable = attention.filter(({ key }) => key !== "partial_coverage");
   const facts: string[] = [];
   if (metrics.bookingsToday !== null) {
     facts.push(
-      countLabel(
-        metrics.bookingsToday,
-        locale,
-        ["booking today", "bookings today"],
-        ["dnešní rezervace", "dnešní rezervace", "dnešních rezervací"],
-      ),
+      aiProductText(locale, "briefing.message024", {
+        count: metrics.bookingsToday,
+      }),
     );
   }
   if (metrics.openTasks !== null) {
     facts.push(
-      countLabel(
-        metrics.openTasks,
-        locale,
-        ["open task", "open tasks"],
-        ["otevřený úkol", "otevřené úkoly", "otevřených úkolů"],
-      ),
+      aiProductText(locale, "briefing.message025", {
+        count: metrics.openTasks,
+      }),
     );
   }
 
   const headline = actionable.length
-    ? cs
-      ? "Dnes je potřeba několik věcí prověřit"
-      : "A few things need your attention today"
-    : cs
-      ? "Studio je dnes na dobré cestě"
-      : "Your studio is on track today";
+    ? aiProductText(locale, "briefing.message026")
+    : aiProductText(locale, "briefing.message027");
   const factSentence = facts.length
     ? facts.join(", ")
-    : cs
-      ? "Dostupné provozní zdroje neobsahují souhrnné počty"
-      : "The available operational sources contain no summary counts";
+    : aiProductText(locale, "briefing.message028");
   const coverageSentence = metrics.coverage.complete
-    ? cs
-      ? "Přehled vychází ze všech dostupných zdrojů pro vaše oprávnění."
-      : "The briefing uses every source available to your current access."
-    : cs
-      ? "Nedostupné hodnoty nejsou vykázány jako nula."
-      : "Unavailable values are not reported as zero.";
+    ? aiProductText(locale, "briefing.message029")
+    : aiProductText(locale, "briefing.message030");
 
   return {
     headline,
@@ -475,7 +405,6 @@ export const buildDailyBriefingOperationsInbox = ({
   suggestedActions: DailyBriefingSuggestedAction[];
   locale: string;
 }): DailyBriefingOperationsInboxItem[] => {
-  const czech = isCzech(locale);
   const actionsByAttentionId = new Map(
     suggestedActions
       .filter((action) => action.attentionId)
@@ -488,17 +417,19 @@ export const buildDailyBriefingOperationsInbox = ({
 
   return attention.slice(0, 10).map((item) => {
     const action = actionsByAttentionId.get(item.id);
-    const description = String(item.description || "").trim().slice(0, 1_000);
-    const prompt = (
-      czech
-        ? `Pomoz mi vyřešit tuto ověřenou provozní položku: ${description}`
-        : `Help me resolve this verified studio item: ${description}`
-    ).slice(0, 500);
+    const description = String(item.description || "")
+      .trim()
+      .slice(0, 1_000);
+    const prompt = aiProductText(locale, "briefing.message031", {
+      value1: description,
+    }).slice(0, 500);
     return {
       id: String(item.id || "").slice(0, 100),
       type: String(item.key || "").slice(0, 100),
       severity: item.severity,
-      title: String(item.title || "").trim().slice(0, 300),
+      title: String(item.title || "")
+        .trim()
+        .slice(0, 300),
       description,
       prompt,
       href: safeAppHref(item.href) || safeAppHref(action?.href),
@@ -510,12 +441,11 @@ export const buildDailyBriefingSuggestedActions = (
   attention: DailyBriefingAttention[],
   locale: string,
 ): DailyBriefingSuggestedAction[] => {
-  const cs = isCzech(locale);
   const actions: DailyBriefingSuggestedAction[] = [
     {
       id: "review-daily-briefing",
       kind: "assistant_intent",
-      label: cs ? "Projít priority s AI" : "Review priorities with AI",
+      label: aiProductText(locale, "briefing.message032"),
       intent: "review-daily-briefing",
       href: "/app/ai?intent=review-daily-briefing",
       attentionId: null,

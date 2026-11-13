@@ -93,6 +93,7 @@
     "express": "^5.2.1",
     "express-rate-limit": "^7.1.0",
     "fs-extra": "^11.2.0",
+    "intl-messageformat": "11.2.11",
     "ioredis": "^5.10.1",
     "jose": "^6.2.4",
     "jsonwebtoken": "^9.0.2",

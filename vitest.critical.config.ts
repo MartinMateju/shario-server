@@ -125,6 +125,7 @@ export default defineConfig({
       "tests/unit/ai/ai.management.test.ts",
       "tests/unit/ai/ai.usage.test.ts",
       "tests/unit/ai/ai.locale-contract.test.ts",
+      "tests/unit/ai/ai-product-locales.test.ts",
       "tests/unit/ai/ai.concierge.test.ts",
       "tests/unit/ai/ai.assistant-page-context.test.ts",
       "tests/unit/ai/ai.assistant-booking-analytics.test.ts",

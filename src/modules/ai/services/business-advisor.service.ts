@@ -23,8 +23,6 @@ import {
 import { AiAdvisorSnapshotModel } from "../ai.models.js";
 import {
   aiResponseLanguageInstruction,
-  isCoreAiLocale,
-  localizedAdvisorFallback,
   resolveAiLocale,
 } from "../ai-locale.js";
 import type { AiRequestContext } from "../ai.types.js";
@@ -190,9 +188,7 @@ export const serializeBusinessAdvisorSnapshot = (
     status,
     locale: resolveAiLocale(snapshot.locale),
     narrativeLocale: resolveAiLocale(snapshot.locale),
-    recommendationLocale: isCoreAiLocale(snapshot.locale)
-      ? resolveAiLocale(snapshot.locale)
-      : "en",
+    recommendationLocale: resolveAiLocale(snapshot.locale),
     headline: String(snapshot.headline || ""),
     summary: String(snapshot.summary || ""),
     recommendations,
@@ -326,12 +322,7 @@ export const generateBusinessAdvisor = async (
     coverage,
     locale,
   );
-  const deterministic = isCoreAiLocale(locale)
-    ? deterministicBase
-    : {
-        ...deterministicBase,
-        ...localizedAdvisorFallback(locale),
-      };
+  const deterministic = deterministicBase;
   const period = {
     from: String(overview.metadata.period.from),
     to: String(overview.metadata.period.to),

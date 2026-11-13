@@ -1,4 +1,4 @@
-export const DAILY_BRIEFING_SCHEMA_VERSION = "daily-studio-briefing-v2";
+export const DAILY_BRIEFING_SCHEMA_VERSION = "daily-studio-briefing-v3";
 export const DAILY_BRIEFING_FRESHNESS_MS = 4 * 60 * 60 * 1_000;
 
 export const DAILY_BRIEFING_SEVERITY = {

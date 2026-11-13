@@ -21,7 +21,6 @@ import {
   aiResponseLanguageInstruction,
   isCoreAiLocale,
   localizedAiServiceUnavailable,
-  localizedDeterministicCopyNotice,
   localizedSetupNavigationLabel,
   normalizeAiLocale,
   resolveAiLocale,
@@ -2392,8 +2391,6 @@ export const getWorkspaceFactFallback = ({
       metrics.staffUpdatesNeedingOwnerAttention,
       metrics.lowStockItems,
 
-
-
       metrics.urgentConversations,
       metrics.unreadConversations,
     ];
@@ -4113,18 +4110,15 @@ export const assistantService = {
         deterministicCommand ||
         (mixedCompositionTurn ? null : verifiedFact)
       : null;
+    // The deterministic templates are authored only in EN/CS. A provider
+    // outage must not turn another selected locale into English UI or an
+    // untranslated action confirmation. Healthy localized responses are unchanged.
     const localeAwareDeterministicFallback = (
       response: AssistantProviderOutput,
     ): AssistantProviderOutput =>
       isCoreAiLocale(locale)
         ? response
-        : {
-            ...response,
-            answer: [
-              localizedDeterministicCopyNotice(locale),
-              response.answer,
-            ].join("\n\n"),
-          };
+        : assistantInsufficientAnswer(localizedAiServiceUnavailable(locale));
     const fallback = (): AssistantProviderOutput => {
       if (setupSnapshot) {
         const diagnostic = getSetupDiagnosticFallback({
@@ -4164,19 +4158,15 @@ export const assistantService = {
       }
       const relevant = knowledge[0];
       const relevantLocale = normalizeAiLocale(relevant?.locale);
-      const usesEnglishFaqFallback =
-        !isCoreAiLocale(locale) && relevantLocale === "en";
       const exactFaq =
         relevant?.kind === "faq" &&
-        (relevantLocale === locale || usesEnglishFaqFallback) &&
+        relevantLocale === locale &&
         knowledgeCoverage?.confidence === KNOWLEDGE_RETRIEVAL_CONFIDENCE.HIGH
           ? relevant.content.split(/\nAnswer:\s*/i)[1]?.trim()
           : "";
       if (exactFaq && relevant) {
         return {
-          answer: usesEnglishFaqFallback
-            ? [localizedDeterministicCopyNotice(locale), exactFaq].join("\n\n")
-            : exactFaq,
+          answer: exactFaq,
           grounding: { basis: "knowledge", insufficientEvidence: false },
           citations: [{ sourceId: relevant.id }],
           actions: [],

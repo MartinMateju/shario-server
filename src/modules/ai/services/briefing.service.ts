@@ -14,8 +14,6 @@ import {
 import { AiBriefingModel } from "../ai.models.js";
 import {
   aiResponseLanguageInstruction,
-  isCoreAiLocale,
-  localizedBriefingFallback,
   resolveAiLocale,
 } from "../ai-locale.js";
 import type { AiRequestContext } from "../ai.types.js";
@@ -71,9 +69,7 @@ const serializeBriefing = (briefing: any, now = new Date()) => {
       complete: false,
     };
   const provenance = briefing.provenance || {};
-  const attention = Array.isArray(briefing.attention)
-    ? briefing.attention
-    : [];
+  const attention = Array.isArray(briefing.attention) ? briefing.attention : [];
   const suggestedActions = Array.isArray(briefing.suggestedActions)
     ? briefing.suggestedActions
     : [];
@@ -88,9 +84,7 @@ const serializeBriefing = (briefing: any, now = new Date()) => {
     dateKey: briefing.dateKey,
     scopeKey: briefing.scopeKey,
     locale: resolveAiLocale(briefing.locale),
-    attentionLocale: isCoreAiLocale(briefing.locale)
-      ? resolveAiLocale(briefing.locale)
-      : "en",
+    attentionLocale: resolveAiLocale(briefing.locale),
     timezone: briefing.timezone || "UTC",
     headline: briefing.headline,
     summary: briefing.summary,
@@ -295,12 +289,7 @@ export const generateBriefing = async (
     attention,
     locale,
   );
-  const deterministic = isCoreAiLocale(locale)
-    ? deterministicBase
-    : {
-        ...deterministicBase,
-        ...localizedBriefingFallback(locale),
-      };
+  const deterministic = deterministicBase;
   const snapshotHash = createDailyBriefingSnapshotHash({
     dateKey,
     timezone,

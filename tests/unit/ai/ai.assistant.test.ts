@@ -1,4 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  AI_LOCALES,
+  localizedAiServiceUnavailable,
+} from "@/modules/ai/ai-locale.js";
 
 const mocks = vi.hoisted(() => ({
   conversationFind: vi.fn(),
@@ -5401,79 +5405,80 @@ describe("workspace AI assistant isolation", () => {
     });
   });
 
-  it("uses a disclosed English exact-FAQ fallback for a Wave 1 locale outage", async () => {
-    const userMessage = {
-      _id: "507f1f77bcf86cd7994390e4",
-      role: "user",
-      content: "Darf ich früher ankommen?",
-      createdAt: new Date(),
-    };
-    const englishFaq = knowledgeSource({
-      id: "kb-arrival-faq",
-      chunkId: "kb-arrival-faq",
-      kind: "faq",
-      locale: "en",
-      title: "Arrival policy",
-      content:
-        "Question: May I arrive early?\nAnswer: Please arrive at your booked start time.",
-      excerpt: "Please arrive at your booked start time.",
-    });
-    mocks.conversationFindOne.mockResolvedValueOnce(
-      conversation({ locale: "en" }),
-    );
-    mocks.messageFind.mockReturnValueOnce(historyList([]));
-    mocks.messageCreate
-      .mockResolvedValueOnce(userMessage)
-      .mockImplementationOnce(async (value) => ({
-        _id: "507f1f77bcf86cd7994390e5",
-        ...value,
+  it.each(AI_LOCALES.filter((locale) => !["en", "cs"].includes(locale)))(
+    "keeps an English FAQ out of the %s fallback during a provider outage",
+    async (locale) => {
+      const userMessage = {
+        _id: "507f1f77bcf86cd7994390e4",
+        role: "user",
+        content: "Darf ich früher ankommen?",
         createdAt: new Date(),
+      };
+      const englishFaq = knowledgeSource({
+        id: "kb-arrival-faq",
+        chunkId: "kb-arrival-faq",
+        kind: "faq",
+        locale: "en",
+        title: "Arrival policy",
+        content:
+          "Question: May I arrive early?\nAnswer: Please arrive at your booked start time.",
+        excerpt: "Please arrive at your booked start time.",
+      });
+      mocks.conversationFindOne.mockResolvedValueOnce(
+        conversation({ locale: "en" }),
+      );
+      mocks.messageFind.mockReturnValueOnce(historyList([]));
+      mocks.messageCreate
+        .mockResolvedValueOnce(userMessage)
+        .mockImplementationOnce(async (value) => ({
+          _id: "507f1f77bcf86cd7994390e5",
+          ...value,
+          createdAt: new Date(),
+        }));
+      mocks.retrieveKnowledge.mockResolvedValueOnce(
+        knowledgeResult([englishFaq], {
+          confidence: "high",
+          locale,
+        }),
+      );
+      mocks.executeAi.mockImplementationOnce(async (request) => ({
+        value: request.fallback(),
+        runId: "run-german-faq-fallback",
+        provider: "deterministic",
+        model: "deterministic-v1",
+        credits: 0,
       }));
-    mocks.retrieveKnowledge.mockResolvedValueOnce(
-      knowledgeResult([englishFaq], {
-        confidence: "high",
-        locale: "de",
-      }),
-    );
-    mocks.executeAi.mockImplementationOnce(async (request) => ({
-      value: request.fallback(),
-      runId: "run-german-faq-fallback",
-      provider: "deterministic",
-      model: "deterministic-v1",
-      credits: 0,
-    }));
 
-    const result = await assistantService.sendMessage(
-      context as any,
-      CONVERSATION_ID,
-      {
-        message: userMessage.content,
-        locale: "de-DE",
-        context: {
-          surface: "knowledge_hub",
-          knowledgeSourceId: KNOWLEDGE_RESOURCE_ID,
-          route: "/app/knowledge",
+      const result = await assistantService.sendMessage(
+        context as any,
+        CONVERSATION_ID,
+        {
+          message: userMessage.content,
+          locale,
+          context: {
+            surface: "knowledge_hub",
+            knowledgeSourceId: KNOWLEDGE_RESOURCE_ID,
+            route: "/app/knowledge",
+          },
         },
-      },
-    );
+      );
 
-    expect(result.message.content).toContain(
-      "Die verifizierten Angaben unten werden auf Englisch angezeigt",
-    );
-    expect(result.message.content).toContain(
-      "Please arrive at your booked start time.",
-    );
-    expect(result.message.grounding).toMatchObject({
-      status: "grounded",
-      basis: "knowledge",
-      insufficientEvidence: false,
-    });
-    expect(result.message.citations).toEqual([
-      expect.objectContaining({ sourceId: "kb-arrival-faq" }),
-    ]);
-  });
+      expect(result.message.content).toBe(
+        localizedAiServiceUnavailable(locale),
+      );
+      expect(result.message.content).not.toContain(
+        "Please arrive at your booked start time.",
+      );
+      expect(result.message.grounding).toMatchObject({
+        status: "unavailable",
+        basis: "insufficient",
+        insufficientEvidence: true,
+      });
+      expect(result.message.citations).toEqual([]);
+    },
+  );
 
-  it("preserves a verified German workspace fact during a provider outage", async () => {
+  it("keeps English deterministic workspace facts out of a German provider outage", async () => {
     mocks.conversationFindOne.mockResolvedValueOnce(
       conversation({ locale: "en" }),
     );
@@ -5503,17 +5508,12 @@ describe("workspace AI assistant isolation", () => {
       },
     );
 
-    expect(result.message.content).toContain(
-      "Die verifizierten Angaben unten werden auf Englisch angezeigt",
-    );
-    expect(result.message.content).toContain("Studio Grohova");
-    expect(result.message.content).not.toContain(
-      "Die lokalisierte Live-Antwort ist vorübergehend nicht verfügbar",
-    );
+    expect(result.message.content).toBe(localizedAiServiceUnavailable("de"));
+    expect(result.message.content).not.toContain("Studio Grohova");
     expect(result.message.grounding).toMatchObject({
-      status: "workspace_facts",
-      basis: "workspace_facts",
-      insufficientEvidence: false,
+      status: "unavailable",
+      basis: "insufficient",
+      insufficientEvidence: true,
     });
     expect(mocks.conversationUpdateOne).toHaveBeenCalledWith(
       { _id: CONVERSATION_ID, tenant: TENANT_ID },
@@ -5523,7 +5523,7 @@ describe("workspace AI assistant isolation", () => {
     );
   });
 
-  it("preserves a confirmation-gated Polish action during a provider outage", async () => {
+  it("does not offer an untranslated Polish action confirmation during a provider outage", async () => {
     mocks.conversationFindOne.mockResolvedValueOnce(
       conversation({ locale: "en" }),
     );
@@ -5563,18 +5563,7 @@ describe("workspace AI assistant isolation", () => {
         credits: 0,
       };
     });
-    mocks.persistActions.mockImplementationOnce(async ({ actions }) => [
-      {
-        _id: "507f1f77bcf86cd799438100",
-        key: actions[0].key,
-        label: "Create event",
-        status: "suggested",
-        preview: {
-          title: actions[0].payload.title,
-          summary: "create_event",
-        },
-      },
-    ]);
+    mocks.persistActions.mockResolvedValueOnce([]);
 
     const result = await assistantService.sendMessage(
       context as any,
@@ -5587,36 +5576,20 @@ describe("workspace AI assistant isolation", () => {
       },
     );
 
-    expect(result.message.content).toContain(
-      "Poniższe zweryfikowane informacje są wyświetlane po angielsku",
-    );
-    expect(result.message.content).toContain("Confirm it below");
-    expect(result.actions).toHaveLength(1);
-    expect(result.actions[0]).toMatchObject({
-      key: "create_event",
-      requiresConfirmation: true,
-    });
+    expect(result.message.content).toBe(localizedAiServiceUnavailable("pl"));
+    expect(result.message.content).not.toContain("Confirm it below");
+    expect(result.actions).toEqual([]);
     expect(result.message.grounding).toMatchObject({
-      status: "workspace_facts",
-      basis: "workspace_facts",
-      insufficientEvidence: false,
+      status: "unavailable",
+      basis: "insufficient",
+      insufficientEvidence: true,
     });
     expect(mocks.persistActions).toHaveBeenCalledWith(
-      expect.objectContaining({
-        actions: [
-          expect.objectContaining({
-            key: "create_event",
-            payload: expect.objectContaining({
-              title: "Private workshop",
-              locationId: LOCATION_ID,
-            }),
-          }),
-        ],
-      }),
+      expect.objectContaining({ actions: [] }),
     );
   });
 
-  it("preserves verified setup guidance and safe navigation for a Wave 1 locale outage", async () => {
+  it("keeps setup outage copy localized when deterministic guidance is not translated", async () => {
     const setupSnapshot = {
       definitionVersion: 1,
       steps: [
@@ -5683,19 +5656,10 @@ describe("workspace AI assistant isolation", () => {
       },
     );
 
-    expect(result.message.content).toContain(
-      "Die verifizierten Angaben unten werden auf Englisch angezeigt",
-    );
-    expect(result.message.content).toContain("Stripe");
-    expect(result.message.grounding.status).toBe("workspace_facts");
-    expect(result.message.navigation).toEqual([
-      {
-        kind: "setup_step",
-        stepId: "payments",
-        label: "Empfohlene Einrichtung öffnen",
-        href: "/app/settings/payments?setupStep=payments",
-      },
-    ]);
+    expect(result.message.content).toBe(localizedAiServiceUnavailable("de"));
+    expect(result.message.content).not.toContain("Stripe is not connected");
+    expect(result.message.grounding.status).toBe("unavailable");
+    expect(result.message.navigation).toEqual([]);
   });
 
   it("uses the selected locale immediately and follows later locale switches during provider fallback", async () => {

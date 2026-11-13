@@ -16,8 +16,6 @@ import { AiConversationModel, AiMessageModel } from "../ai.models.js";
 import {
   aiCopy,
   aiResponseLanguageInstruction,
-  isCoreAiLocale,
-  localizedDeterministicCopyNotice,
   normalizeAiLocale,
   resolveAiLocale,
 } from "../ai-locale.js";
@@ -78,8 +76,8 @@ const safeFeatureEnabled = async (
     const entitlement = await resolveAiEntitlement(tenantId);
     return Boolean(
       entitlement.canUseAi &&
-        entitlement.settings?.[setting] !== false &&
-        isAiFeatureIncludedInPlan(entitlement.tenant, setting),
+      entitlement.settings?.[setting] !== false &&
+      isAiFeatureIncludedInPlan(entitlement.tenant, setting),
     );
   } catch {
     return false;
@@ -203,11 +201,9 @@ const fallbackAnswer = (
   const locale = resolveAiLocale(localeValue);
   const article = retrieval.sources[0];
   const articleLocale = normalizeAiLocale(article?.locale);
-  const usesEnglishFaqFallback =
-    !isCoreAiLocale(locale) && articleLocale === "en";
   const exactFaq =
     article?.kind === "faq" &&
-    (articleLocale === locale || usesEnglishFaqFallback) &&
+    articleLocale === locale &&
     retrieval.coverage.confidence === KNOWLEDGE_RETRIEVAL_CONFIDENCE.HIGH
       ? article.content.split(/\nAnswer:\s*/i)[1]?.trim()
       : "";
@@ -219,9 +215,7 @@ const fallbackAnswer = (
       : "";
   if (article && safeExactFaq) {
     return {
-      answer: usesEnglishFaqFallback
-        ? [localizedDeterministicCopyNotice(locale), safeExactFaq].join("\n\n")
-        : safeExactFaq,
+      answer: safeExactFaq,
       grounding: {
         basis: "knowledge",
         insufficientEvidence: false,
@@ -654,10 +648,7 @@ export const customerConcierge = async (
   if (
     !entitlement.canUseAi ||
     entitlement.settings.customerConciergeEnabled === false ||
-    !isAiFeatureIncludedInPlan(
-      entitlement.tenant,
-      "customerConciergeEnabled",
-    )
+    !isAiFeatureIncludedInPlan(entitlement.tenant, "customerConciergeEnabled")
   ) {
     forbidden({
       message: "Customer concierge is not available.",

@@ -1,4 +1,4 @@
-export const BUSINESS_ADVISOR_SCHEMA_VERSION = "studio-business-advisor-v1";
+export const BUSINESS_ADVISOR_SCHEMA_VERSION = "studio-business-advisor-v2";
 export const BUSINESS_ADVISOR_FRESHNESS_MS = 24 * 60 * 60 * 1_000;
 export const BUSINESS_ADVISOR_ADVICE_VALIDITY_MS = 7 * 24 * 60 * 60 * 1_000;
 export const BUSINESS_ADVISOR_RETENTION_MS = 120 * 24 * 60 * 60 * 1_000;

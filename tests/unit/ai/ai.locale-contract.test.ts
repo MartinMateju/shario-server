@@ -4,11 +4,8 @@ import {
   AI_LOCALE_LANGUAGE_NAME,
   AI_LOCALES,
   aiResponseLanguageInstruction,
-  localizedAdvisorFallback,
   localizedAiServiceUnavailable,
   localizedBookingComposerNavigationLabel,
-  localizedBriefingFallback,
-  localizedDeterministicCopyNotice,
   localizedSetupNavigationLabel,
 } from "@/modules/ai/ai-locale.js";
 import {
@@ -247,71 +244,14 @@ describe("AI rollout locale contract", () => {
     },
   );
 
-  it.each([
-    ["sv-SE", "svaret i realtid", "driftuppgifterna"],
-    ["no-NO", "KI-sammendraget", "KI-analysen"],
-    ["fi-FI", "tällä hetkellä", "tekoälyanalyysi"],
-  ] as const)(
-    "keeps deterministic Wave 2B fallback copy native for %s",
-    (locale, firstPhrase, secondPhrase) => {
-      const copy = [
-        localizedAiServiceUnavailable(locale),
-        localizedDeterministicCopyNotice(locale),
-        ...Object.values(localizedBriefingFallback(locale)),
-        ...Object.values(localizedAdvisorFallback(locale)),
-      ].join(" ");
-
-      expect(copy).toContain(firstPhrase);
-      expect(copy).toContain(secondPhrase);
-      expect(copy).not.toContain("temporarily unavailable");
+  it.each(AI_LOCALES.filter((locale) => locale !== "en"))(
+    "keeps an unavailable AI response in %s without appending English details",
+    (locale) => {
+      const copy = localizedAiServiceUnavailable(locale);
+      expect(copy.trim()).not.toBe("");
+      expect(copy).not.toBe(localizedAiServiceUnavailable("en"));
     },
   );
-
-  it.each([
-    ["hu-HU", "MI-összefoglaló", "MI-elemzés"],
-    ["el-GR", "σύνοψη ΤΝ", "ανάλυση ΤΝ"],
-    ["tr-TR", "yapay zekâ özeti", "yapay zekâ değerlendirmesi"],
-  ] as const)(
-    "keeps deterministic Wave 2C fallback copy native for %s",
-    (locale, firstPhrase, secondPhrase) => {
-      const copy = [
-        localizedAiServiceUnavailable(locale),
-        localizedDeterministicCopyNotice(locale),
-        ...Object.values(localizedBriefingFallback(locale)),
-        ...Object.values(localizedAdvisorFallback(locale)),
-      ].join(" ");
-
-      expect(copy).toContain(firstPhrase);
-      expect(copy).toContain(secondPhrase);
-      expect(copy).not.toContain("temporarily unavailable");
-    },
-  );
-
-  it("keeps deterministic Dutch fallback copy native", () => {
-    const copy = [
-      localizedAiServiceUnavailable("nl-NL"),
-      localizedDeterministicCopyNotice("nl-NL"),
-      ...Object.values(localizedBriefingFallback("nl-NL")),
-      ...Object.values(localizedAdvisorFallback("nl-NL")),
-    ].join(" ");
-
-    expect(copy).toContain("AI-samenvatting");
-    expect(copy).toContain("AI-analyse");
-    expect(copy).not.toContain("temporarily unavailable");
-  });
-
-  it("keeps deterministic Romanian fallback copy native", () => {
-    const copy = [
-      localizedAiServiceUnavailable("ro-RO"),
-      localizedDeterministicCopyNotice("ro-RO"),
-      ...Object.values(localizedBriefingFallback("ro-RO")),
-      ...Object.values(localizedAdvisorFallback("ro-RO")),
-    ].join(" ");
-
-    expect(copy).toContain("Rezumatul AI");
-    expect(copy).toContain("Analiza AI");
-    expect(copy).not.toContain("temporarily unavailable");
-  });
 
   it.each(localeCases)(
     "reports deterministic coverage locale behavior for %s",

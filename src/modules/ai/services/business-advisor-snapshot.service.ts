@@ -1,3 +1,4 @@
+import { aiProductText } from "../ai-product-copy.js";
 import { createHash } from "node:crypto";
 
 import { resolveAiLocale, type AiLocale } from "../ai-locale.js";
@@ -49,9 +50,8 @@ const sha256 = (value: unknown): string =>
     .update(JSON.stringify(stableValue(value)))
     .digest("hex");
 
-export const normalizeBusinessAdvisorLocale = (
-  value: unknown,
-): AiLocale => resolveAiLocale(value);
+export const normalizeBusinessAdvisorLocale = (value: unknown): AiLocale =>
+  resolveAiLocale(value);
 
 const sourceNames = (value: unknown): string[] =>
   [
@@ -255,7 +255,6 @@ export const buildBusinessAdvisorRecommendations = (
 ): BusinessAdvisorRecommendation[] => {
   const overview = asRecord(overviewValue);
   const locale = normalizeBusinessAdvisorLocale(localeValue);
-  const cs = locale === "cs";
   const summary = asRecord(overview.summary);
   const salesKpi = asRecord(summary.netSales);
   const bookingKpi = asRecord(summary.bookings);
@@ -299,19 +298,17 @@ export const buildBusinessAdvisorRecommendations = (
           salesOrders >= 30
             ? BUSINESS_ADVISOR_CONFIDENCE.HIGH
             : BUSINESS_ADVISOR_CONFIDENCE.MEDIUM,
-        title: cs ? "Prověřte pokles tržeb" : "Review the sales decline",
-        rationale: cs
-          ? `Čisté tržby jsou oproti srovnávacímu období nižší o ${Math.abs(salesChange)} %.`
-          : `Net sales are ${Math.abs(salesChange)}% lower than the comparison period.`,
-        nextStep: cs
-          ? "Porovnejte vývoj rezervací a nejprodávanější nabídky před změnou cen nebo propagace."
-          : "Compare booking trends and top offers before changing pricing or promotion.",
+        title: aiProductText(localeValue, "advisor.message001"),
+        rationale: aiProductText(localeValue, "advisor.message002", {
+          value1: Math.abs(salesChange),
+        }),
+        nextStep: aiProductText(localeValue, "advisor.message003"),
         evidence: [
           evidence({
             overview,
             source: "sales",
             metric: "netSales",
-            label: cs ? "Čisté tržby" : "Net sales",
+            label: aiProductText(localeValue, "advisor.message004"),
             value: salesValue,
             previousValue: salesPrevious,
             changePercent: salesChange,
@@ -351,19 +348,17 @@ export const buildBusinessAdvisorRecommendations = (
           Math.min(bookingsValue, bookingsPrevious) >= 30
             ? BUSINESS_ADVISOR_CONFIDENCE.HIGH
             : BUSINESS_ADVISOR_CONFIDENCE.MEDIUM,
-        title: cs ? "Prověřte pokles rezervací" : "Review the booking decline",
-        rationale: cs
-          ? `Počet rezervací je oproti srovnávacímu období nižší o ${Math.abs(bookingsChange)} %.`
-          : `Bookings are ${Math.abs(bookingsChange)}% lower than the comparison period.`,
-        nextStep: cs
-          ? "Zkontrolujte časový přehled a nabídky, u kterých se změnil zájem."
-          : "Review the time breakdown and offers whose demand has changed.",
+        title: aiProductText(localeValue, "advisor.message005"),
+        rationale: aiProductText(localeValue, "advisor.message006", {
+          value1: Math.abs(bookingsChange),
+        }),
+        nextStep: aiProductText(localeValue, "advisor.message007"),
         evidence: [
           evidence({
             overview,
             source: "bookings",
             metric: "bookings",
-            label: cs ? "Rezervace" : "Bookings",
+            label: aiProductText(localeValue, "advisor.message008"),
             value: bookingsValue,
             previousValue: bookingsPrevious,
             changePercent: bookingsChange,
@@ -402,21 +397,17 @@ export const buildBusinessAdvisorRecommendations = (
         impact: BUSINESS_ADVISOR_PRIORITY.HIGH,
         effort: BUSINESS_ADVISOR_EFFORT.MEDIUM,
         confidence: BUSINESS_ADVISOR_CONFIDENCE.MEDIUM,
-        title: cs
-          ? "Využijte volnou kapacitu"
-          : "Put available capacity to work",
-        rationale: cs
-          ? `Odhadované využití nastavené kapacity je ${utilizationValue} %.`
-          : `Estimated configured-capacity utilization is ${utilizationValue}%.`,
-        nextStep: cs
-          ? "Najděte méně využité dny a hodiny a otestujte cílenou nabídku pro tyto termíny."
-          : "Identify lower-utilization days and hours, then test a targeted offer for those times.",
+        title: aiProductText(localeValue, "advisor.message009"),
+        rationale: aiProductText(localeValue, "advisor.message010", {
+          value1: utilizationValue,
+        }),
+        nextStep: aiProductText(localeValue, "advisor.message011"),
         evidence: [
           evidence({
             overview,
             source: "bookings",
             metric: "utilizationPercent",
-            label: cs ? "Využití kapacity" : "Capacity utilization",
+            label: aiProductText(localeValue, "advisor.message012"),
             value: utilizationValue,
             previousValue: utilizationPrevious,
             changePercent: utilizationKpi.changePercent,
@@ -442,21 +433,17 @@ export const buildBusinessAdvisorRecommendations = (
         impact: BUSINESS_ADVISOR_PRIORITY.MEDIUM,
         effort: BUSINESS_ADVISOR_EFFORT.MEDIUM,
         confidence: BUSINESS_ADVISOR_CONFIDENCE.MEDIUM,
-        title: cs
-          ? "Prověřte pokles využití"
-          : "Review the utilization decline",
-        rationale: cs
-          ? `Využití nastavené kapacity kleslo o ${utilizationDrop} procentních bodů.`
-          : `Configured-capacity utilization fell by ${utilizationDrop} percentage points.`,
-        nextStep: cs
-          ? "Porovnejte časový přehled obou období a zaměřte se na největší rozdíly."
-          : "Compare both periods in the time breakdown and focus on the largest differences.",
+        title: aiProductText(localeValue, "advisor.message013"),
+        rationale: aiProductText(localeValue, "advisor.message014", {
+          value1: utilizationDrop,
+        }),
+        nextStep: aiProductText(localeValue, "advisor.message015"),
         evidence: [
           evidence({
             overview,
             source: "bookings",
             metric: "utilizationPercent",
-            label: cs ? "Využití kapacity" : "Capacity utilization",
+            label: aiProductText(localeValue, "advisor.message016"),
             value: utilizationValue,
             previousValue: utilizationPrevious,
             changePercent: utilizationKpi.changePercent,
@@ -500,21 +487,18 @@ export const buildBusinessAdvisorRecommendations = (
         // not the comparison cohort size, so this trend must stay medium
         // confidence even when the current cohort is large.
         confidence: BUSINESS_ADVISOR_CONFIDENCE.MEDIUM,
-        title: cs
-          ? "Podpořte návrat zákazníků"
-          : "Encourage customers to return",
-        rationale: cs
-          ? `Podíl vracejících se zákazníků je ${returningValue} % z ${activeCustomers} aktivních zákazníků v období.`
-          : `Returning customers represent ${returningValue}% of ${activeCustomers} active customers in the period.`,
-        nextStep: cs
-          ? "Prověřte navazující nabídku nebo členství a nejprve ji otestujte na malé skupině."
-          : "Review a follow-up offer or membership and test it with a small audience first.",
+        title: aiProductText(localeValue, "advisor.message017"),
+        rationale: aiProductText(localeValue, "advisor.message018", {
+          value1: returningValue,
+          value2: activeCustomers,
+        }),
+        nextStep: aiProductText(localeValue, "advisor.message019"),
         evidence: [
           evidence({
             overview,
             source: "customers",
             metric: "returningCustomerPercent",
-            label: cs ? "Vracející se zákazníci" : "Returning customers",
+            label: aiProductText(localeValue, "advisor.message020"),
             value: returningValue,
             previousValue: returningPrevious,
             changePercent: returningKpi.changePercent,
@@ -524,7 +508,7 @@ export const buildBusinessAdvisorRecommendations = (
             overview,
             source: "customers",
             metric: "activeCustomers",
-            label: cs ? "Aktivní zákazníci" : "Active customers",
+            label: aiProductText(localeValue, "advisor.message021"),
             value: activeCustomers,
             unit: "count",
           }),
@@ -552,7 +536,9 @@ export const buildBusinessAdvisorRecommendations = (
         text(left.name).localeCompare(text(right.name)),
     )[0];
   if (underfilled) {
-    const name = text(underfilled.name, 160) || (cs ? "Kurz" : "Course");
+    const name =
+      text(underfilled.name, 160) ||
+      aiProductText(localeValue, "advisor.message022");
     const fill = Number(underfilled.fillPercent);
     const key = `courses.underfilled:${text(underfilled.productId, 100) || name}`;
     cards.push(
@@ -572,15 +558,14 @@ export const buildBusinessAdvisorRecommendations = (
           Number(underfilled.capacity) >= 40
             ? BUSINESS_ADVISOR_CONFIDENCE.HIGH
             : BUSINESS_ADVISOR_CONFIDENCE.MEDIUM,
-        title: cs
-          ? `Zlepšete naplnění kurzu ${name}`
-          : `Improve fill for ${name}`,
-        rationale: cs
-          ? `Kurz má při ${Number(underfilled.sessions)} konáních naplněnost ${fill} %.`
-          : `The course has ${fill}% fill across ${Number(underfilled.sessions)} sessions.`,
-        nextStep: cs
-          ? "Zkontrolujte termíny, popis a publikum kurzu a změňte vždy jen jednu věc k ověření dopadu."
-          : "Review timing, description, and audience, changing one thing at a time to measure the result.",
+        title: aiProductText(localeValue, "advisor.message023", {
+          value1: name,
+        }),
+        rationale: aiProductText(localeValue, "advisor.message024", {
+          value1: fill,
+          value2: Number(underfilled.sessions),
+        }),
+        nextStep: aiProductText(localeValue, "advisor.message025"),
         evidence: [
           evidence({
             overview,
@@ -609,7 +594,9 @@ export const buildBusinessAdvisorRecommendations = (
         text(left.name).localeCompare(text(right.name)),
     )[0];
   if (highDemand) {
-    const name = text(highDemand.name, 160) || (cs ? "Kurz" : "Course");
+    const name =
+      text(highDemand.name, 160) ||
+      aiProductText(localeValue, "advisor.message026");
     const fill = Number(highDemand.fillPercent);
     const key = `courses.high_demand:${text(highDemand.productId, 100) || name}`;
     cards.push(
@@ -625,15 +612,14 @@ export const buildBusinessAdvisorRecommendations = (
           Number(highDemand.sessions) >= 5 && Number(highDemand.capacity) >= 40
             ? BUSINESS_ADVISOR_CONFIDENCE.HIGH
             : BUSINESS_ADVISOR_CONFIDENCE.MEDIUM,
-        title: cs
-          ? `Prověřte další termín kurzu ${name}`
-          : `Consider another ${name} session`,
-        rationale: cs
-          ? `Kurz má při ${Number(highDemand.sessions)} konáních naplněnost ${fill} %.`
-          : `The course has ${fill}% fill across ${Number(highDemand.sessions)} sessions.`,
-        nextStep: cs
-          ? "Ověřte kapacitu týmu a prostoru před přidáním dalšího termínu."
-          : "Check team and space capacity before adding another session.",
+        title: aiProductText(localeValue, "advisor.message027", {
+          value1: name,
+        }),
+        rationale: aiProductText(localeValue, "advisor.message028", {
+          value1: fill,
+          value2: Number(highDemand.sessions),
+        }),
+        nextStep: aiProductText(localeValue, "advisor.message029"),
         evidence: [
           evidence({
             overview,
@@ -670,21 +656,18 @@ export const buildBusinessAdvisorRecommendations = (
         impact: BUSINESS_ADVISOR_PRIORITY.MEDIUM,
         effort: BUSINESS_ADVISOR_EFFORT.LOW,
         confidence: BUSINESS_ADVISOR_CONFIDENCE.HIGH,
-        title: cs
-          ? "Prověřte položky bez objednávky"
-          : "Review stock without a reorder",
-        rationale: cs
-          ? `Nízkou zásobu má ${lowStock} položek a otevřeno je ${openReorders} požadavků na doplnění.`
-          : `${lowStock} items are low on stock while ${openReorders} reorder requests are open.`,
-        nextStep: cs
-          ? "Ověřte, které nízké zásoby ještě nemají požadavek na doplnění."
-          : "Check which low-stock items do not yet have a reorder request.",
+        title: aiProductText(localeValue, "advisor.message030"),
+        rationale: aiProductText(localeValue, "advisor.message031", {
+          value1: lowStock,
+          value2: openReorders,
+        }),
+        nextStep: aiProductText(localeValue, "advisor.message032"),
         evidence: [
           evidence({
             overview,
             source: "inventory",
             metric: "lowStockItems",
-            label: cs ? "Nízké zásoby" : "Low-stock items",
+            label: aiProductText(localeValue, "advisor.message033"),
             value: lowStock,
             unit: "count",
             pointInTime: true,
@@ -693,7 +676,7 @@ export const buildBusinessAdvisorRecommendations = (
             overview,
             source: "inventory",
             metric: "openReorders",
-            label: cs ? "Otevřené objednávky" : "Open reorders",
+            label: aiProductText(localeValue, "advisor.message034"),
             value: openReorders,
             unit: "count",
             pointInTime: true,
@@ -732,21 +715,17 @@ export const buildBusinessAdvisorRecommendations = (
         impact: BUSINESS_ADVISOR_PRIORITY.MEDIUM,
         effort: BUSINESS_ADVISOR_EFFORT.LOW,
         confidence: BUSINESS_ADVISOR_CONFIDENCE.HIGH,
-        title: cs
-          ? "Snižte počet zpožděných úkolů"
-          : "Reduce overdue studio tasks",
-        rationale: cs
-          ? `Aktuálně je po termínu ${overdueTasks} otevřených úkolů.`
-          : `${overdueTasks} open tasks are currently overdue.`,
-        nextStep: cs
-          ? "Potvrďte vlastníka a realistický termín každého zpožděného úkolu."
-          : "Confirm an owner and a realistic due date for each overdue task.",
+        title: aiProductText(localeValue, "advisor.message035"),
+        rationale: aiProductText(localeValue, "advisor.message036", {
+          value1: overdueTasks,
+        }),
+        nextStep: aiProductText(localeValue, "advisor.message037"),
         evidence: [
           evidence({
             overview,
             source: "staffTasks",
             metric: "overdueTasks",
-            label: cs ? "Zpožděné úkoly" : "Overdue tasks",
+            label: aiProductText(localeValue, "advisor.message038"),
             value: overdueTasks,
             unit: "count",
             pointInTime: true,
@@ -795,36 +774,25 @@ export const deterministicBusinessAdvisorNarrative = (
   coverage: BusinessAdvisorCoverage,
   localeValue: unknown,
 ): BusinessAdvisorNarrative => {
-  const cs = normalizeBusinessAdvisorLocale(localeValue) === "cs";
   const high = recommendations.filter(
     ({ priority }) => priority === BUSINESS_ADVISOR_PRIORITY.HIGH,
   ).length;
   if (!recommendations.length) {
     return {
-      headline: cs
-        ? "Zatím bez silného doporučení"
-        : "No strong recommendation yet",
+      headline: aiProductText(localeValue, "advisor.message039"),
       summary: coverage.complete
-        ? cs
-          ? "Dostupná data nyní nepřekračují konzervativní hranice pro obchodní doporučení."
-          : "Available data does not currently cross the conservative thresholds for business advice."
-        : cs
-          ? "Pro spolehlivé doporučení zatím není dostupné dostatečné pokrytí dat."
-          : "There is not yet enough data coverage for a reliable recommendation.",
+        ? aiProductText(localeValue, "advisor.message040")
+        : aiProductText(localeValue, "advisor.message041"),
       rankedRecommendationIds: [],
     };
   }
   return {
     headline: high
-      ? cs
-        ? "Nejdříve se zaměřte na nejdůležitější příležitosti"
-        : "Start with the highest-priority opportunities"
-      : cs
-        ? "Několik příležitostí stojí za prověření"
-        : "A few opportunities are worth reviewing",
-    summary: cs
-      ? `Poradce našel ${recommendations.length} doporučení založených na ověřených datech studia.`
-      : `The advisor found ${recommendations.length} recommendations grounded in verified studio data.`,
+      ? aiProductText(localeValue, "advisor.message042")
+      : aiProductText(localeValue, "advisor.message043"),
+    summary: aiProductText(localeValue, "advisor.message044", {
+      value1: recommendations.length,
+    }),
     rankedRecommendationIds: recommendations.map(({ id }) => id),
   };
 };

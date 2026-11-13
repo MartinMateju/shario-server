@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { AI_LOCALES } from "@/modules/ai/ai-locale.js";
 
 const mocks = vi.hoisted(() => ({
   getTenantBySlug: vi.fn(),
@@ -36,15 +37,19 @@ vi.mock("@/modules/ai/ai.models.js", () => ({
     create: mocks.messageCreate,
   },
 }));
-vi.mock("@/modules/ai/services/ai-access.service.js", async (importOriginal) => {
-  const actual = await importOriginal<
-    typeof import("@/modules/ai/services/ai-access.service.js")
-  >();
-  return {
-    resolveAiEntitlement: mocks.resolveEntitlement,
-    isAiFeatureIncludedInPlan: actual.isAiFeatureIncludedInPlan,
-  };
-});
+vi.mock(
+  "@/modules/ai/services/ai-access.service.js",
+  async (importOriginal) => {
+    const actual =
+      await importOriginal<
+        typeof import("@/modules/ai/services/ai-access.service.js")
+      >();
+    return {
+      resolveAiEntitlement: mocks.resolveEntitlement,
+      isAiFeatureIncludedInPlan: actual.isAiFeatureIncludedInPlan,
+    };
+  },
+);
 vi.mock("@/modules/ai/services/ai-usage.service.js", () => ({
   getAiUsage: mocks.getUsage,
 }));
@@ -313,13 +318,17 @@ describe("concierge configuration privacy", () => {
     "keeps public and customer availability aligned with %s V%s execution",
     async (plan, planVersion, included) => {
       mocks.getTenantBySlug.mockResolvedValueOnce(tenant());
-      mocks.resolveEntitlement.mockResolvedValue(entitlement({
-        tenant: { ...tenant(), plan, planVersion },
-      }));
+      mocks.resolveEntitlement.mockResolvedValue(
+        entitlement({
+          tenant: { ...tenant(), plan, planVersion },
+        }),
+      );
       await expect(getCustomerConciergeConfig(TENANT_ID)).resolves.toEqual({
         enabled: included,
       });
-      await expect(getPublicConciergeConfig("studio-grohovka")).resolves.toEqual(
+      await expect(
+        getPublicConciergeConfig("studio-grohovka"),
+      ).resolves.toEqual(
         included
           ? { enabled: true, studioName: "Studio Grohovka", locations: [] }
           : { enabled: false },
@@ -330,10 +339,15 @@ describe("concierge configuration privacy", () => {
 
   it("respects disabled switches on an entitled plan", async () => {
     mocks.getTenantBySlug.mockResolvedValueOnce(tenant());
-    mocks.resolveEntitlement.mockResolvedValue(entitlement({
-      tenant: { ...tenant(), plan: "studio_plus", planVersion: 3 },
-      settings: { customerConciergeEnabled: false, publicConciergeEnabled: false },
-    }));
+    mocks.resolveEntitlement.mockResolvedValue(
+      entitlement({
+        tenant: { ...tenant(), plan: "studio_plus", planVersion: 3 },
+        settings: {
+          customerConciergeEnabled: false,
+          publicConciergeEnabled: false,
+        },
+      }),
+    );
     await expect(getCustomerConciergeConfig(TENANT_ID)).resolves.toEqual({
       enabled: false,
     });
@@ -898,69 +912,73 @@ describe("public studio concierge", () => {
     );
   });
 
-  it("uses a disclosed English exact-FAQ fallback for a Wave 1 locale outage", async () => {
-    const userMessage = {
-      _id: "507f1f77bcf86cd799439043",
-      role: "user",
-      content: "Darf ich früher ankommen?",
-      createdAt: new Date(),
-    };
-    const englishFaq = knowledgeSource({
-      id: "kb-arrival-faq",
-      chunkId: "kb-arrival-faq",
-      kind: "faq",
-      locale: "en",
-      title: "Arrival policy",
-      content:
-        "Question: May I arrive early?\nAnswer: Please arrive at your booked start time.",
-      excerpt: "Please arrive at your booked start time.",
-    });
-    mocks.conversationCreate.mockImplementationOnce(async (value) => ({
-      _id: CONVERSATION_ID,
-      locationId: LOCATION_ID,
-      ...value,
-    }));
-    mocks.messageCreate
-      .mockResolvedValueOnce(userMessage)
-      .mockImplementationOnce(async (value) => ({
-        _id: "507f1f77bcf86cd799439044",
-        ...value,
+  it.each(AI_LOCALES.filter((locale) => !["en", "cs"].includes(locale)))(
+    "keeps an English FAQ out of the %s public fallback",
+    async (locale) => {
+      const userMessage = {
+        _id: "507f1f77bcf86cd799439043",
+        role: "user",
+        content: "Darf ich früher ankommen?",
         createdAt: new Date(),
+      };
+      const englishFaq = knowledgeSource({
+        id: "kb-arrival-faq",
+        chunkId: "kb-arrival-faq",
+        kind: "faq",
+        locale: "en",
+        title: "Arrival policy",
+        content:
+          "Question: May I arrive early?\nAnswer: Please arrive at your booked start time.",
+        excerpt: "Please arrive at your booked start time.",
+      });
+      mocks.conversationCreate.mockImplementationOnce(async (value) => ({
+        _id: CONVERSATION_ID,
+        locationId: LOCATION_ID,
+        ...value,
       }));
-    mocks.messageFind.mockReturnValueOnce(historyQuery([userMessage]));
-    mocks.retrieveKnowledge.mockResolvedValueOnce(
-      knowledgeResult([englishFaq], {
-        confidence: "high",
-        locale: "de",
-      }),
-    );
-    mocks.executeAi.mockImplementationOnce(async (request) => ({
-      value: request.fallback(),
-      runId: "run-public-german-faq-fallback",
-      provider: "deterministic",
-      model: "deterministic-v1",
-    }));
+      mocks.messageCreate
+        .mockResolvedValueOnce(userMessage)
+        .mockImplementationOnce(async (value) => ({
+          _id: "507f1f77bcf86cd799439044",
+          ...value,
+          createdAt: new Date(),
+        }));
+      mocks.messageFind.mockReturnValueOnce(historyQuery([userMessage]));
+      mocks.retrieveKnowledge.mockResolvedValueOnce(
+        knowledgeResult([englishFaq], {
+          confidence: "high",
+          locale,
+        }),
+      );
+      mocks.executeAi.mockImplementationOnce(async (request) => ({
+        value: request.fallback(),
+        runId: "run-public-german-faq-fallback",
+        provider: "deterministic",
+        model: "deterministic-v1",
+      }));
 
-    const result = await publicConcierge("studio-grohovka", {
-      message: userMessage.content,
-      locale: "de",
-      locationId: LOCATION_ID,
-    });
+      const result = await publicConcierge("studio-grohovka", {
+        message: userMessage.content,
+        locale,
+        locationId: LOCATION_ID,
+      });
 
-    expect(result.answer).toContain(
-      "Die verifizierten Angaben unten werden auf Englisch angezeigt",
-    );
-    expect(result.answer).toContain("Please arrive at your booked start time.");
-    expect(result.citations).toEqual([
-      expect.objectContaining({ sourceId: "kb-arrival-faq" }),
-    ]);
-    expect(result.message.grounding).toMatchObject({
-      status: "grounded",
-      basis: "knowledge",
-      insufficientEvidence: false,
-    });
-    expect(result.handoffRecommended).toBe(false);
-  });
+      expect(result.answer).not.toContain(
+        "Please arrive at your booked start time.",
+      );
+      expect(result.answer).not.toContain(
+        "The verified details below are shown in English",
+      );
+      expect(result.answer).toBeTruthy();
+      expect(result.citations).toEqual([]);
+      expect(result.message.grounding).toMatchObject({
+        status: "insufficient",
+        basis: "insufficient",
+        insufficientEvidence: true,
+      });
+      expect(result.handoffRecommended).toBe(true);
+    },
+  );
 
   it("refuses a door code from the deterministic exact-FAQ fallback", async () => {
     const userMessage = {
@@ -1073,9 +1091,11 @@ describe("public studio concierge", () => {
   });
 
   it("rejects an excluded plan before moderation, location, or conversation access", async () => {
-    mocks.resolveEntitlement.mockResolvedValueOnce(entitlement({
-      tenant: { ...tenant(), plan: "professional", planVersion: 3 },
-    }));
+    mocks.resolveEntitlement.mockResolvedValueOnce(
+      entitlement({
+        tenant: { ...tenant(), plan: "professional", planVersion: 3 },
+      }),
+    );
     await expect(
       publicConcierge("studio-grohovka", {
         message: "When are you open?",
@@ -1109,9 +1129,11 @@ describe("authenticated customer concierge", () => {
   });
 
   it("rejects an excluded plan before moderation, location, or conversation access", async () => {
-    mocks.resolveEntitlement.mockResolvedValueOnce(entitlement({
-      tenant: { ...tenant(), plan: "professional", planVersion: 3 },
-    }));
+    mocks.resolveEntitlement.mockResolvedValueOnce(
+      entitlement({
+        tenant: { ...tenant(), plan: "professional", planVersion: 3 },
+      }),
+    );
     await expect(
       customerConcierge(customerContext, {
         message: "When are you open?",
