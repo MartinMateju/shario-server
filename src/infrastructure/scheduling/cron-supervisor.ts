@@ -1,6 +1,7 @@
 import cron, { type ScheduledTask } from "node-cron";
 
 import { logger } from "@/config/logger.js";
+import type { SchedulerCoordinator } from "./redis-scheduler-coordinator.js";
 
 type CronTask = () => unknown | Promise<unknown>;
 
@@ -17,6 +18,7 @@ export class CronSupervisor {
   constructor(
     private readonly scheduleCron: ScheduleCron = cron.schedule,
     private readonly log: CronLogger = logger,
+    private readonly coordinator?: SchedulerCoordinator,
   ) {}
 
   schedule(name: string, expression: string, task: CronTask): ScheduledTask {
@@ -34,7 +36,7 @@ export class CronSupervisor {
     return scheduledTask;
   }
 
-  async run(name: string, task: CronTask): Promise<void> {
+  async run(name: string, task: CronTask, intervalMs = 60_000): Promise<void> {
     if (!this.acceptingRuns) {
       return;
     }
@@ -51,7 +53,13 @@ export class CronSupervisor {
 
     let execution: Promise<void>;
     execution = Promise.resolve()
-      .then(task)
+      .then(() =>
+        this.coordinator
+          ? this.coordinator.run(name, intervalMs, () =>
+              this.acceptingRuns ? task() : undefined,
+            )
+          : task(),
+      )
       .then(() => undefined)
       .catch((error) => {
         this.log.error(

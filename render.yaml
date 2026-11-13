@@ -1,0 +1,671 @@
+# Unapplied plan: creates five paid Node services + private paid Redis (~$45/month).
+# No provider credentials are included. Read docs/RENDER.md before applying.
+# Provider inputs are prompted once on shario-api and referenced by its workers.
+# Generated application secrets belong only to this new Shario environment.
+# Confirm all shario-* resource names are unused; existing names can be updated.
+# yaml-language-server: $schema=https://render.com/schema/render.yaml.json
+previews:
+  generation: 'off'
+services:
+- type: web
+  name: shario-api
+  runtime: node
+  repo: https://github.com/MartinMateju/shario-server
+  branch: main
+  region: frankfurt
+  plan: 0.5c-512mb
+  numInstances: 1
+  buildCommand: npm ci --include=dev --no-audit --no-fund && npm run build && npm prune --omit=dev --no-audit --no-fund
+  startCommand: node dist/server.js
+  autoDeployTrigger: checksPass
+  maxShutdownDelaySeconds: 60
+  healthCheckPath: /ready
+  envVars:
+  - fromGroup: shario-production-runtime
+  - key: REDIS_URL
+    fromService:
+      type: keyvalue
+      name: shario-redis
+      property: connectionString
+  - key: SERVER_URL
+    sync: false
+  - key: CLIENT_URL
+    sync: false
+  - key: MONGO_URI
+    sync: false
+  - key: AUTH_EMAIL
+    sync: false
+  - key: EMAIL_USER
+    sync: false
+  - key: EMAIL_PASSWORD
+    sync: false
+  - key: EMAIL_HOST
+    sync: false
+  - key: EMAIL_PORT
+    sync: false
+  - key: EMAIL_SECURE
+    sync: false
+  - key: STRIPE_KEY
+    sync: false
+  - key: STRIPE_TENANT_BILLING_MODE
+    sync: false
+  - key: WEBHOOK_SECRET
+    sync: false
+  - key: STRIPE_CONNECT_WEBHOOK_SECRET
+    sync: false
+  - key: STRIPE_BILLING_WEBHOOK_SECRET
+    sync: false
+  - key: POSTMARK_ACCOUNT_TOKEN
+    sync: false
+  - key: POSTMARK_SYSTEM_SERVER_TOKEN
+    sync: false
+  - key: POSTMARK_SYSTEM_FROM_EMAIL
+    sync: false
+  - key: POSTMARK_OUTBOUND_WEBHOOK_URL
+    sync: false
+  - key: R2_ACCOUNT_ID
+    sync: false
+  - key: R2_ACCESS_KEY_ID
+    sync: false
+  - key: R2_SECRET_ACCESS_KEY
+    sync: false
+  - key: R2_BUCKET
+    sync: false
+  - key: R2_PUBLIC_URL
+    sync: false
+- type: worker
+  name: shario-notifications
+  runtime: node
+  repo: https://github.com/MartinMateju/shario-server
+  branch: main
+  region: frankfurt
+  plan: 0.5c-512mb
+  numInstances: 1
+  buildCommand: npm ci --include=dev --no-audit --no-fund && npm run build && npm prune --omit=dev --no-audit --no-fund
+  startCommand: node dist/workers/notification.worker.js
+  autoDeployTrigger: checksPass
+  maxShutdownDelaySeconds: 60
+  envVars:
+  - fromGroup: shario-production-runtime
+  - key: REDIS_URL
+    fromService:
+      type: keyvalue
+      name: shario-redis
+      property: connectionString
+  - key: SERVER_URL
+    fromService:
+      type: web
+      name: shario-api
+      envVarKey: SERVER_URL
+  - key: CLIENT_URL
+    fromService:
+      type: web
+      name: shario-api
+      envVarKey: CLIENT_URL
+  - key: MONGO_URI
+    fromService:
+      type: web
+      name: shario-api
+      envVarKey: MONGO_URI
+  - key: AUTH_EMAIL
+    fromService:
+      type: web
+      name: shario-api
+      envVarKey: AUTH_EMAIL
+  - key: EMAIL_USER
+    fromService:
+      type: web
+      name: shario-api
+      envVarKey: EMAIL_USER
+  - key: EMAIL_PASSWORD
+    fromService:
+      type: web
+      name: shario-api
+      envVarKey: EMAIL_PASSWORD
+  - key: EMAIL_HOST
+    fromService:
+      type: web
+      name: shario-api
+      envVarKey: EMAIL_HOST
+  - key: EMAIL_PORT
+    fromService:
+      type: web
+      name: shario-api
+      envVarKey: EMAIL_PORT
+  - key: EMAIL_SECURE
+    fromService:
+      type: web
+      name: shario-api
+      envVarKey: EMAIL_SECURE
+  - key: STRIPE_KEY
+    fromService:
+      type: web
+      name: shario-api
+      envVarKey: STRIPE_KEY
+  - key: STRIPE_TENANT_BILLING_MODE
+    fromService:
+      type: web
+      name: shario-api
+      envVarKey: STRIPE_TENANT_BILLING_MODE
+  - key: WEBHOOK_SECRET
+    fromService:
+      type: web
+      name: shario-api
+      envVarKey: WEBHOOK_SECRET
+  - key: STRIPE_CONNECT_WEBHOOK_SECRET
+    fromService:
+      type: web
+      name: shario-api
+      envVarKey: STRIPE_CONNECT_WEBHOOK_SECRET
+  - key: STRIPE_BILLING_WEBHOOK_SECRET
+    fromService:
+      type: web
+      name: shario-api
+      envVarKey: STRIPE_BILLING_WEBHOOK_SECRET
+  - key: POSTMARK_ACCOUNT_TOKEN
+    fromService:
+      type: web
+      name: shario-api
+      envVarKey: POSTMARK_ACCOUNT_TOKEN
+  - key: POSTMARK_SYSTEM_SERVER_TOKEN
+    fromService:
+      type: web
+      name: shario-api
+      envVarKey: POSTMARK_SYSTEM_SERVER_TOKEN
+  - key: POSTMARK_SYSTEM_FROM_EMAIL
+    fromService:
+      type: web
+      name: shario-api
+      envVarKey: POSTMARK_SYSTEM_FROM_EMAIL
+  - key: POSTMARK_OUTBOUND_WEBHOOK_URL
+    fromService:
+      type: web
+      name: shario-api
+      envVarKey: POSTMARK_OUTBOUND_WEBHOOK_URL
+  - key: R2_ACCOUNT_ID
+    fromService:
+      type: web
+      name: shario-api
+      envVarKey: R2_ACCOUNT_ID
+  - key: R2_ACCESS_KEY_ID
+    fromService:
+      type: web
+      name: shario-api
+      envVarKey: R2_ACCESS_KEY_ID
+  - key: R2_SECRET_ACCESS_KEY
+    fromService:
+      type: web
+      name: shario-api
+      envVarKey: R2_SECRET_ACCESS_KEY
+  - key: R2_BUCKET
+    fromService:
+      type: web
+      name: shario-api
+      envVarKey: R2_BUCKET
+  - key: R2_PUBLIC_URL
+    fromService:
+      type: web
+      name: shario-api
+      envVarKey: R2_PUBLIC_URL
+- type: worker
+  name: shario-communication-emails
+  runtime: node
+  repo: https://github.com/MartinMateju/shario-server
+  branch: main
+  region: frankfurt
+  plan: 0.5c-512mb
+  numInstances: 1
+  buildCommand: npm ci --include=dev --no-audit --no-fund && npm run build && npm prune --omit=dev --no-audit --no-fund
+  startCommand: node dist/workers/communication-email.worker.js
+  autoDeployTrigger: checksPass
+  maxShutdownDelaySeconds: 60
+  envVars:
+  - fromGroup: shario-production-runtime
+  - key: REDIS_URL
+    fromService:
+      type: keyvalue
+      name: shario-redis
+      property: connectionString
+  - key: SERVER_URL
+    fromService:
+      type: web
+      name: shario-api
+      envVarKey: SERVER_URL
+  - key: CLIENT_URL
+    fromService:
+      type: web
+      name: shario-api
+      envVarKey: CLIENT_URL
+  - key: MONGO_URI
+    fromService:
+      type: web
+      name: shario-api
+      envVarKey: MONGO_URI
+  - key: AUTH_EMAIL
+    fromService:
+      type: web
+      name: shario-api
+      envVarKey: AUTH_EMAIL
+  - key: EMAIL_USER
+    fromService:
+      type: web
+      name: shario-api
+      envVarKey: EMAIL_USER
+  - key: EMAIL_PASSWORD
+    fromService:
+      type: web
+      name: shario-api
+      envVarKey: EMAIL_PASSWORD
+  - key: EMAIL_HOST
+    fromService:
+      type: web
+      name: shario-api
+      envVarKey: EMAIL_HOST
+  - key: EMAIL_PORT
+    fromService:
+      type: web
+      name: shario-api
+      envVarKey: EMAIL_PORT
+  - key: EMAIL_SECURE
+    fromService:
+      type: web
+      name: shario-api
+      envVarKey: EMAIL_SECURE
+  - key: STRIPE_KEY
+    fromService:
+      type: web
+      name: shario-api
+      envVarKey: STRIPE_KEY
+  - key: STRIPE_TENANT_BILLING_MODE
+    fromService:
+      type: web
+      name: shario-api
+      envVarKey: STRIPE_TENANT_BILLING_MODE
+  - key: WEBHOOK_SECRET
+    fromService:
+      type: web
+      name: shario-api
+      envVarKey: WEBHOOK_SECRET
+  - key: STRIPE_CONNECT_WEBHOOK_SECRET
+    fromService:
+      type: web
+      name: shario-api
+      envVarKey: STRIPE_CONNECT_WEBHOOK_SECRET
+  - key: STRIPE_BILLING_WEBHOOK_SECRET
+    fromService:
+      type: web
+      name: shario-api
+      envVarKey: STRIPE_BILLING_WEBHOOK_SECRET
+  - key: POSTMARK_ACCOUNT_TOKEN
+    fromService:
+      type: web
+      name: shario-api
+      envVarKey: POSTMARK_ACCOUNT_TOKEN
+  - key: POSTMARK_SYSTEM_SERVER_TOKEN
+    fromService:
+      type: web
+      name: shario-api
+      envVarKey: POSTMARK_SYSTEM_SERVER_TOKEN
+  - key: POSTMARK_SYSTEM_FROM_EMAIL
+    fromService:
+      type: web
+      name: shario-api
+      envVarKey: POSTMARK_SYSTEM_FROM_EMAIL
+  - key: POSTMARK_OUTBOUND_WEBHOOK_URL
+    fromService:
+      type: web
+      name: shario-api
+      envVarKey: POSTMARK_OUTBOUND_WEBHOOK_URL
+  - key: R2_ACCOUNT_ID
+    fromService:
+      type: web
+      name: shario-api
+      envVarKey: R2_ACCOUNT_ID
+  - key: R2_ACCESS_KEY_ID
+    fromService:
+      type: web
+      name: shario-api
+      envVarKey: R2_ACCESS_KEY_ID
+  - key: R2_SECRET_ACCESS_KEY
+    fromService:
+      type: web
+      name: shario-api
+      envVarKey: R2_SECRET_ACCESS_KEY
+  - key: R2_BUCKET
+    fromService:
+      type: web
+      name: shario-api
+      envVarKey: R2_BUCKET
+  - key: R2_PUBLIC_URL
+    fromService:
+      type: web
+      name: shario-api
+      envVarKey: R2_PUBLIC_URL
+- type: worker
+  name: shario-communication-scheduler
+  runtime: node
+  repo: https://github.com/MartinMateju/shario-server
+  branch: main
+  region: frankfurt
+  plan: 0.5c-512mb
+  numInstances: 1
+  buildCommand: npm ci --include=dev --no-audit --no-fund && npm run build && npm prune --omit=dev --no-audit --no-fund
+  startCommand: node dist/workers/communication-automation-scheduler.worker.js
+  autoDeployTrigger: checksPass
+  maxShutdownDelaySeconds: 60
+  envVars:
+  - fromGroup: shario-production-runtime
+  - key: REDIS_URL
+    fromService:
+      type: keyvalue
+      name: shario-redis
+      property: connectionString
+  - key: SERVER_URL
+    fromService:
+      type: web
+      name: shario-api
+      envVarKey: SERVER_URL
+  - key: CLIENT_URL
+    fromService:
+      type: web
+      name: shario-api
+      envVarKey: CLIENT_URL
+  - key: MONGO_URI
+    fromService:
+      type: web
+      name: shario-api
+      envVarKey: MONGO_URI
+  - key: AUTH_EMAIL
+    fromService:
+      type: web
+      name: shario-api
+      envVarKey: AUTH_EMAIL
+  - key: EMAIL_USER
+    fromService:
+      type: web
+      name: shario-api
+      envVarKey: EMAIL_USER
+  - key: EMAIL_PASSWORD
+    fromService:
+      type: web
+      name: shario-api
+      envVarKey: EMAIL_PASSWORD
+  - key: EMAIL_HOST
+    fromService:
+      type: web
+      name: shario-api
+      envVarKey: EMAIL_HOST
+  - key: EMAIL_PORT
+    fromService:
+      type: web
+      name: shario-api
+      envVarKey: EMAIL_PORT
+  - key: EMAIL_SECURE
+    fromService:
+      type: web
+      name: shario-api
+      envVarKey: EMAIL_SECURE
+  - key: STRIPE_KEY
+    fromService:
+      type: web
+      name: shario-api
+      envVarKey: STRIPE_KEY
+  - key: STRIPE_TENANT_BILLING_MODE
+    fromService:
+      type: web
+      name: shario-api
+      envVarKey: STRIPE_TENANT_BILLING_MODE
+  - key: WEBHOOK_SECRET
+    fromService:
+      type: web
+      name: shario-api
+      envVarKey: WEBHOOK_SECRET
+  - key: STRIPE_CONNECT_WEBHOOK_SECRET
+    fromService:
+      type: web
+      name: shario-api
+      envVarKey: STRIPE_CONNECT_WEBHOOK_SECRET
+  - key: STRIPE_BILLING_WEBHOOK_SECRET
+    fromService:
+      type: web
+      name: shario-api
+      envVarKey: STRIPE_BILLING_WEBHOOK_SECRET
+  - key: POSTMARK_ACCOUNT_TOKEN
+    fromService:
+      type: web
+      name: shario-api
+      envVarKey: POSTMARK_ACCOUNT_TOKEN
+  - key: POSTMARK_SYSTEM_SERVER_TOKEN
+    fromService:
+      type: web
+      name: shario-api
+      envVarKey: POSTMARK_SYSTEM_SERVER_TOKEN
+  - key: POSTMARK_SYSTEM_FROM_EMAIL
+    fromService:
+      type: web
+      name: shario-api
+      envVarKey: POSTMARK_SYSTEM_FROM_EMAIL
+  - key: POSTMARK_OUTBOUND_WEBHOOK_URL
+    fromService:
+      type: web
+      name: shario-api
+      envVarKey: POSTMARK_OUTBOUND_WEBHOOK_URL
+  - key: R2_ACCOUNT_ID
+    fromService:
+      type: web
+      name: shario-api
+      envVarKey: R2_ACCOUNT_ID
+  - key: R2_ACCESS_KEY_ID
+    fromService:
+      type: web
+      name: shario-api
+      envVarKey: R2_ACCESS_KEY_ID
+  - key: R2_SECRET_ACCESS_KEY
+    fromService:
+      type: web
+      name: shario-api
+      envVarKey: R2_SECRET_ACCESS_KEY
+  - key: R2_BUCKET
+    fromService:
+      type: web
+      name: shario-api
+      envVarKey: R2_BUCKET
+  - key: R2_PUBLIC_URL
+    fromService:
+      type: web
+      name: shario-api
+      envVarKey: R2_PUBLIC_URL
+- type: worker
+  name: shario-data-imports
+  runtime: node
+  repo: https://github.com/MartinMateju/shario-server
+  branch: main
+  region: frankfurt
+  plan: 0.5c-512mb
+  numInstances: 1
+  buildCommand: npm ci --include=dev --no-audit --no-fund && npm run build && npm prune --omit=dev --no-audit --no-fund
+  startCommand: node dist/workers/data-import.worker.js
+  autoDeployTrigger: checksPass
+  maxShutdownDelaySeconds: 60
+  envVars:
+  - fromGroup: shario-production-runtime
+  - key: REDIS_URL
+    fromService:
+      type: keyvalue
+      name: shario-redis
+      property: connectionString
+  - key: SERVER_URL
+    fromService:
+      type: web
+      name: shario-api
+      envVarKey: SERVER_URL
+  - key: CLIENT_URL
+    fromService:
+      type: web
+      name: shario-api
+      envVarKey: CLIENT_URL
+  - key: MONGO_URI
+    fromService:
+      type: web
+      name: shario-api
+      envVarKey: MONGO_URI
+  - key: AUTH_EMAIL
+    fromService:
+      type: web
+      name: shario-api
+      envVarKey: AUTH_EMAIL
+  - key: EMAIL_USER
+    fromService:
+      type: web
+      name: shario-api
+      envVarKey: EMAIL_USER
+  - key: EMAIL_PASSWORD
+    fromService:
+      type: web
+      name: shario-api
+      envVarKey: EMAIL_PASSWORD
+  - key: EMAIL_HOST
+    fromService:
+      type: web
+      name: shario-api
+      envVarKey: EMAIL_HOST
+  - key: EMAIL_PORT
+    fromService:
+      type: web
+      name: shario-api
+      envVarKey: EMAIL_PORT
+  - key: EMAIL_SECURE
+    fromService:
+      type: web
+      name: shario-api
+      envVarKey: EMAIL_SECURE
+  - key: STRIPE_KEY
+    fromService:
+      type: web
+      name: shario-api
+      envVarKey: STRIPE_KEY
+  - key: STRIPE_TENANT_BILLING_MODE
+    fromService:
+      type: web
+      name: shario-api
+      envVarKey: STRIPE_TENANT_BILLING_MODE
+  - key: WEBHOOK_SECRET
+    fromService:
+      type: web
+      name: shario-api
+      envVarKey: WEBHOOK_SECRET
+  - key: STRIPE_CONNECT_WEBHOOK_SECRET
+    fromService:
+      type: web
+      name: shario-api
+      envVarKey: STRIPE_CONNECT_WEBHOOK_SECRET
+  - key: STRIPE_BILLING_WEBHOOK_SECRET
+    fromService:
+      type: web
+      name: shario-api
+      envVarKey: STRIPE_BILLING_WEBHOOK_SECRET
+  - key: POSTMARK_ACCOUNT_TOKEN
+    fromService:
+      type: web
+      name: shario-api
+      envVarKey: POSTMARK_ACCOUNT_TOKEN
+  - key: POSTMARK_SYSTEM_SERVER_TOKEN
+    fromService:
+      type: web
+      name: shario-api
+      envVarKey: POSTMARK_SYSTEM_SERVER_TOKEN
+  - key: POSTMARK_SYSTEM_FROM_EMAIL
+    fromService:
+      type: web
+      name: shario-api
+      envVarKey: POSTMARK_SYSTEM_FROM_EMAIL
+  - key: POSTMARK_OUTBOUND_WEBHOOK_URL
+    fromService:
+      type: web
+      name: shario-api
+      envVarKey: POSTMARK_OUTBOUND_WEBHOOK_URL
+  - key: R2_ACCOUNT_ID
+    fromService:
+      type: web
+      name: shario-api
+      envVarKey: R2_ACCOUNT_ID
+  - key: R2_ACCESS_KEY_ID
+    fromService:
+      type: web
+      name: shario-api
+      envVarKey: R2_ACCESS_KEY_ID
+  - key: R2_SECRET_ACCESS_KEY
+    fromService:
+      type: web
+      name: shario-api
+      envVarKey: R2_SECRET_ACCESS_KEY
+  - key: R2_BUCKET
+    fromService:
+      type: web
+      name: shario-api
+      envVarKey: R2_BUCKET
+  - key: R2_PUBLIC_URL
+    fromService:
+      type: web
+      name: shario-api
+      envVarKey: R2_PUBLIC_URL
+- type: keyvalue
+  name: shario-redis
+  region: frankfurt
+  plan: 256mb
+  ipAllowList: []
+  maxmemoryPolicy: noeviction
+  persistenceMode: journal-snapshot
+envVarGroups:
+- name: shario-production-runtime
+  envVars:
+  - key: NODE_VERSION
+    value: '22'
+  - key: NODE_ENV
+    value: production
+  - key: LOG_LEVEL
+    value: info
+  - key: COMMUNICATION_SCHEDULER_INTERVAL_MS
+    value: '60000'
+  - key: SHUTDOWN_DRAIN_TIMEOUT_MS
+    value: '30000'
+  - key: SHUTDOWN_CLEANUP_TIMEOUT_MS
+    value: '20000'
+  - key: NATIVE_INVOICES_ENABLED
+    value: 'false'
+  - key: DATA_IMPORT_COMMERCE_ENABLED
+    value: 'false'
+  - key: LEGACY_PLATFORM_CHECKOUT_WEBHOOK_ENABLED
+    value: 'false'
+  - key: TENANT_BILLING_EMAILS_ENABLED
+    value: 'true'
+  - key: EMAIL_ALLOW_SELF_SIGNED
+    value: 'false'
+  - key: EMAIL_FROM_NAME
+    value: Shario
+  - key: POSTMARK_FROM_DOMAIN
+    value: notify.shario.io
+  - key: POSTMARK_SYSTEM_FROM_NAME
+    value: Shario
+  - key: POSTMARK_TENANT_SERVER_PREFIX
+    value: shario-production
+  - key: POSTMARK_MESSAGE_STREAM
+    value: outbound
+  - key: ACCESS_TOKEN_SECRET
+    generateValue: true
+  - key: REFRESH_TOKEN_SECRET
+    generateValue: true
+  - key: WAITLIST_TOKEN_PEPPER
+    generateValue: true
+  - key: BOOKING_INTENT_SECRET
+    generateValue: true
+  - key: EMAIL_SECRET_KEY
+    generateValue: true
+  - key: COMMUNICATION_SECRET_KEY
+    generateValue: true
+  - key: ACCESS_CODE_ENCRYPTION_KEY
+    generateValue: true
+  - key: POSTMARK_OUTBOUND_WEBHOOK_USERNAME
+    generateValue: true
+  - key: POSTMARK_OUTBOUND_WEBHOOK_PASSWORD
+    generateValue: true

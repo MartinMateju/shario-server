@@ -12,6 +12,8 @@ import {
   communicationEmailQueueName,
 } from "@/infrastructure/queues/communication-email.queue.js";
 import { startWorkerOperationalTelemetry } from "@/infrastructure/queues/worker-operational-telemetry.js";
+import { CronSupervisor } from "@/infrastructure/scheduling/cron-supervisor.js";
+import { createRedisSchedulerCoordinator } from "@/infrastructure/scheduling/redis-scheduler-coordinator.js";
 import { runAutomatedCommunications } from "@/modules/communication-automations/services/communication-automation-runner.service.js";
 import { runCustomOrderDeadlineReminders } from "@/modules/custom-orders/custom-order.reminders.js";
 
@@ -27,6 +29,12 @@ const INTERVAL_MS =
 
 export const startCommunicationAutomationScheduler = async () => {
   await connectDB();
+  const schedulerCoordination = createRedisSchedulerCoordinator();
+  const supervisor = new CronSupervisor(
+    undefined,
+    logger,
+    schedulerCoordination.coordinator,
+  );
 
   let currentRun: Promise<void> | null = null;
   let isShuttingDown = false;
@@ -48,9 +56,9 @@ export const startCommunicationAutomationScheduler = async () => {
       return;
     }
 
-    const startedAt = Date.now();
-    telemetry.recordSchedulerStarted();
-    const execution = (async () => {
+    const execution = supervisor.run("communicationAutomationScheduler", async () => {
+      const startedAt = Date.now();
+      telemetry.recordSchedulerStarted();
       try {
         logger.info("Checking communication automations.");
 
@@ -90,7 +98,7 @@ export const startCommunicationAutomationScheduler = async () => {
           "Communication automation scheduler failed.",
         );
       }
-    })();
+    }, INTERVAL_MS);
 
     currentRun = execution;
 
@@ -108,6 +116,7 @@ export const startCommunicationAutomationScheduler = async () => {
       isShuttingDown = true;
     },
     stopSchedulers: () => {
+      supervisor.stop();
       telemetry.stop();
       if (intervalId) {
         clearInterval(intervalId);
@@ -117,10 +126,11 @@ export const startCommunicationAutomationScheduler = async () => {
     drainSteps: [
       {
         name: "communication-scheduler-tick",
-        run: () => currentRun || Promise.resolve(),
+        run: () => supervisor.drain(),
       },
     ],
     cleanupSteps: [
+      { name: "scheduler-coordination", run: () => schedulerCoordination.close() },
       {
         name: "communication-email-queue",
         run: () => communicationEmailQueue.close(),

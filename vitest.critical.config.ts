@@ -54,6 +54,7 @@ export default defineConfig({
       "tests/unit/data-import/data-import-history.test.ts",
       "tests/unit/http/**/*.test.{ts,js}",
       "tests/unit/infrastructure/**/*.test.{ts,js}",
+      "tests/integration/scheduler-coordination.test.ts",
       "tests/unit/invoice/**/*.test.{ts,js}",
       "tests/unit/location/**/*.test.{ts,js}",
       "tests/unit/membership/**/*.test.{ts,js}",

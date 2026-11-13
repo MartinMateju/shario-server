@@ -31,6 +31,7 @@ jobs:
       RUN_MONGO_INTEGRATION_TESTS: "true"
       MONGOMS_DOWNLOAD_DIR: ${{ github.workspace }}/.cache/mongodb-binaries
       OPENAI_API_KEY: ""
+      TEST_REDIS_SERVER: /usr/bin/redis-server
 
     steps:
       - name: Check out repository
@@ -53,6 +54,9 @@ jobs:
 
       - name: Install locked dependencies
         run: npm ci --no-audit --no-fund
+
+      - name: Install disposable scheduler test Redis
+        run: sudo apt-get update && sudo apt-get install -y redis-server
 
       - name: Run production-critical tests
         run: npm run test:critical

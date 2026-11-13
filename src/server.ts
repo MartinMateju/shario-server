@@ -23,6 +23,7 @@ import { dataImportQueue } from "@/infrastructure/queues/data-import.queue.js";
 import { notificationQueue } from "@/infrastructure/queues/notification.queue.js";
 import { closeRedisConnection } from "@/infrastructure/redis/redis.js";
 import { CronSupervisor } from "@/infrastructure/scheduling/cron-supervisor.js";
+import { createRedisSchedulerCoordinator } from "@/infrastructure/scheduling/redis-scheduler-coordinator.js";
 import { sendUpcomingBookingReminders } from "@/modules/access-codes/jobs/access-code-reminder.job.js";
 import { sendOutAccessCodes } from "@/modules/access-codes/jobs/access-code-notification.job.js";
 import { generateDueAiBriefings } from "@/modules/ai/services/ai-scheduler.service.js";
@@ -206,6 +207,9 @@ export const registerCronJobs = (
 
 const startServer = async (): Promise<void> => {
   let cronSupervisor: CronSupervisor | null = null;
+  let schedulerCoordination: ReturnType<
+    typeof createRedisSchedulerCoordinator
+  > | null = null;
   let server: ReturnType<typeof app.listen> | null = null;
 
   try {
@@ -239,7 +243,12 @@ const startServer = async (): Promise<void> => {
       reconcileAiUsageReservations(),
     );
 
-    cronSupervisor = new CronSupervisor();
+    schedulerCoordination = createRedisSchedulerCoordinator();
+    cronSupervisor = new CronSupervisor(
+      undefined,
+      logger,
+      schedulerCoordination.coordinator,
+    );
     registerCronJobs(cronSupervisor);
 
     server = app.listen(PORT);
@@ -276,6 +285,10 @@ const startServer = async (): Promise<void> => {
         },
         { name: "tenant-email-transporters", run: clearEmailServiceCache },
         { name: "default-email-transporter", run: closeEmailTransporter },
+        {
+          name: "scheduler-coordination",
+          run: () => schedulerCoordination.close(),
+        },
         { name: "redis", run: closeRedisConnection },
         { name: "mongodb", run: closeDatabaseConnection },
       ],
@@ -319,6 +332,7 @@ const startServer = async (): Promise<void> => {
       closeRedisConnection(),
       closeDatabaseConnection(),
     ]);
+    schedulerCoordination?.close();
     clearEmailServiceCache();
     closeEmailTransporter();
     process.exit(1);

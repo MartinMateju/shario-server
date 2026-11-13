@@ -28,6 +28,7 @@ jobs:
       REDIS_URL: redis://127.0.0.1:6381
       MONGOMS_DOWNLOAD_DIR: ${{ github.workspace }}/.cache/mongodb-binaries
       OPENAI_API_KEY: ""
+      TEST_REDIS_SERVER: /usr/bin/redis-server
 
     services:
       redis:
@@ -61,6 +62,9 @@ jobs:
 
       - name: Install locked dependencies
         run: npm ci --no-audit --no-fund
+
+      - name: Install disposable scheduler test Redis
+        run: sudo apt-get update && sudo apt-get install -y redis-server
 
       - name: Typecheck production sources
         run: npm run typecheck:production

@@ -1,0 +1,31 @@
+# Allow only build inputs into the Docker context. Local credentials, Git data,
+# tests, reports, database snapshots, logs and generated dist/node_modules stay out.
+**
+!Dockerfile
+!.dockerignore
+!package.json
+!package-lock.json
+!tsconfig.json
+!tsconfig.build.json
+!src/
+!src/**
+!scripts/
+!scripts/install-voucher-fonts.mjs
+!scripts/container-healthcheck.mjs
+!assets/
+!assets/fonts/
+!assets/fonts/manrope/
+!assets/fonts/manrope/**
+
+# Keep secrets excluded even if they are accidentally placed in an allowed tree.
+**/.env
+**/.env.*
+**/*.pem
+**/*.key
+**/*.p12
+**/*.pfx
+**/*credentials*.json
+**/node_modules
+**/coverage
+**/migration-data
+**/.DS_Store

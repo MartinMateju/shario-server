@@ -15,9 +15,15 @@ npm run dev
 
 Start `npm run dev` in `shario-client` separately. The API uses port **4311**, the frontend **4310**, MongoDB **27028** with the `shario` database, and Redis **6381**. Compose has its own `shario-local` project and volumes. MongoDB runs as a replica set because registration and bookings use transactions.
 
-`setup:local` creates fresh signing/encryption keys and shares only the required server-side auth-proxy key with the frontend. Files are ignored by Git and existing configuration is never overwritten. Stripe, Postmark, SMTP, R2, OAuth and AI values must be supplied for the corresponding integrations. They are not copied from Skab. The ordinary server deliberately validates provider configuration; use the isolated E2E harness for a provider-free test environment.
+`setup:local` creates fresh backend signing/encryption keys and copies the frontend example without adding API secrets. The current frontend calls the API directly; optional backend proxy/handoff keys stay on the server. Files are ignored by Git and existing configuration is never overwritten. Stripe, Postmark, SMTP, R2, OAuth and AI values must be supplied for the corresponding integrations. They are not copied from Skab. The ordinary server deliberately validates provider configuration; use the isolated E2E harness for a provider-free test environment.
 
-`npm run dev` starts the API and import worker. Production worker commands for communication emails, automation scheduling and data imports are listed in `package.json` and should be supervised separately.
+`npm run dev` starts the API and import worker. Production worker commands for notifications, communication emails, automation scheduling and data imports are listed in `package.json` and should be supervised separately. See the [portable Node deployment guide](docs/DEPLOYMENT.md) for the shared container image, health checks and service commands.
+
+## Development diagnostics
+
+Run `npm run doctor` to check selected configuration and perform read-only MongoDB reachability, replica-set and collection-count checks. It loads `.env` privately, lets shell variables take precedence, and prints key names/status only. `npm run doctor -- --offline` skips database networking. It does not start the API or workers, write data, send email, or validate provider credentials remotely; a green result is not a production provider check.
+
+See the [Render deployment plan](docs/RENDER.md) for the unapplied API, workers and private Redis Blueprint, required credentials and estimated recurring cost.
 
 ## Verification
 

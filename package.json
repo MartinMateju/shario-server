@@ -62,7 +62,10 @@
     "indexes:vouchers": "tsx src/modules/coupon/scripts/sync-voucher-foundation-indexes.ts --apply",
     "infra:up": "docker compose up -d --wait",
     "infra:down": "docker compose down",
-    "setup:local": "node scripts/setup-local.mjs"
+    "setup:local": "node scripts/setup-local.mjs",
+    "worker:notifications": "node dist/workers/notification.worker.js",
+    "worker:notifications:dev": "tsx src/workers/notification.worker.ts",
+    "doctor": "node scripts/check-development.mjs"
   },
   "author": "Martin Mateju",
   "license": "ISC",
