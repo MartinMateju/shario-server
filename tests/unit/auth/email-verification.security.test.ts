@@ -313,10 +313,16 @@ describe("customer email verification security", () => {
     expect(mocks.deletePendingEmailTokens).toHaveBeenCalledWith(
       TENANT_A,
       USER_ID,
+      undefined,
+      { email: "customer@example.com", sessionVersion: 0 },
     );
     expect(mocks.createEmailToken).toHaveBeenCalledOnce();
     const created = mocks.createEmailToken.mock.calls[0][0];
     expect(created.hashedToken).toMatch(/^[a-f0-9]{64}$/);
+    expect(created).toMatchObject({
+      email: "customer@example.com",
+      sessionVersion: 0,
+    });
 
     const mail = mocks.sendEmail.mock.calls[0][0];
     expect(mail.subject).toContain("Olivka Ceramics");
@@ -324,6 +330,20 @@ describe("customer email verification security", () => {
       "http://studio-olivka.localhost:3000/cs/verify-email?",
     );
     expect(mail.text).not.toContain("evil.example");
+  });
+
+  it("sends verification to the active primary custom domain without a browser origin", async () => {
+    mocks.findOne.mockReturnValue(queryResult({ _id: USER_ID, email: "customer@example.com", isEmailVerified: false }));
+    await verificationService.sendVerificationEmail({
+      tenant: {
+        ...tenant,
+        domains: [{ hostname: "booking.commonground.example", type: "custom", status: "active", isPrimary: true }],
+      },
+      userId: USER_ID,
+      email: "customer@example.com",
+    });
+    expect(mocks.sendEmail.mock.calls[0][0].text).toContain("https://booking.commonground.example/cs/verify-email?");
+    expect(mocks.sendEmail.mock.calls[0][0].text).not.toContain("studio-olivka.localhost");
   });
 
   it("binds token consumption to the tenant and leaves a real token intact after a wrong token", async () => {
@@ -357,6 +377,8 @@ describe("customer email verification security", () => {
         _id: "64b000000000000000000004",
         tenant: TENANT_A,
         user: USER_ID,
+        email: "customer@example.com",
+        sessionVersion: 0,
       })
       .mockResolvedValueOnce(null);
 
@@ -376,6 +398,8 @@ describe("customer email verification security", () => {
         tenant: expect.objectContaining({
           toString: expect.any(Function),
         }),
+        email: "customer@example.com",
+        $or: [{ sessionVersion: 0 }, { sessionVersion: { $exists: false } }],
       },
       {
         $set: {
@@ -395,6 +419,41 @@ describe("customer email verification security", () => {
     });
 
     expect(mocks.updateOne).toHaveBeenCalledOnce();
+  });
+
+  it("rejects legacy unbound verification links rather than verifying a replacement address", async () => {
+    installTransaction();
+    mocks.consumePendingEmailToken.mockResolvedValue({
+      user: USER_ID,
+      tenant: TENANT_A,
+    });
+    await expect(
+      verificationService.verifyEmail({
+        tenantId: TENANT_A,
+        token: "d".repeat(64),
+      }),
+    ).rejects.toMatchObject({ code: "INVALID_EMAIL_VERIFICATION" });
+    expect(mocks.updateOne).not.toHaveBeenCalled();
+  });
+
+  it("rejects a consumed link when its address or credential version no longer matches", async () => {
+    installTransaction();
+    mocks.consumePendingEmailToken.mockResolvedValue({
+      user: USER_ID,
+      email: "old@example.com",
+      sessionVersion: 3,
+    });
+    mocks.updateOne.mockReturnValue(updateResult(0));
+    await expect(
+      verificationService.verifyEmail({
+        tenantId: TENANT_A,
+        token: "e".repeat(64),
+      }),
+    ).rejects.toMatchObject({ code: "INVALID_EMAIL_VERIFICATION" });
+    expect(mocks.updateOne.mock.calls[0][0]).toMatchObject({
+      email: "old@example.com",
+      sessionVersion: 3,
+    });
   });
 });
 

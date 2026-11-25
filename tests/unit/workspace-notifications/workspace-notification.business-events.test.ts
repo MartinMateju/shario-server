@@ -147,7 +147,7 @@ describe("workspace notification business-event factories", () => {
       expect.objectContaining({
         actorUserId: ACTOR_ID,
         requiredPermission: "bookings.view",
-        preferenceKey: "bookingAssigned",
+        preferenceKey: "bookingCreated",
         locationId: LOCATION_ONE_ID,
         eventType: "booking.created",
         actionUrl: "/app/bookings",

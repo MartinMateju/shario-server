@@ -21,6 +21,7 @@ import {
   physicalStatusFilter,
 } from "@/modules/coupon/voucher-physical-delivery.policy.js";
 import { acquireVoucherTenantMutationLock } from "@/modules/product/voucher-offering.policy.js";
+import { TenantModel } from "@/modules/tenants/tenant.model.js";
 
 let repl: MongoMemoryReplSet;
 const tenant = new mongoose.Types.ObjectId();
@@ -65,13 +66,15 @@ describe("voucher physical fulfillment", () => {
   beforeAll(async () => {
     repl = await MongoMemoryReplSet.create({ replSet: { count: 1 } });
     await mongoose.connect(repl.getUri());
-    await mongoose.connection.createCollection("tenants");
-    await Promise.all([Coupon.init(), CouponOrder.init()]);
+    await Promise.all([TenantModel.init(), Coupon.init(), CouponOrder.init()]);
   }, 60_000);
   beforeEach(async () => {
     await Promise.all([Coupon.collection.deleteMany({}), CouponOrder.collection.deleteMany({})]);
     await mongoose.connection.collection("tenants").deleteMany({});
-    await mongoose.connection.collection("tenants").insertMany([{ _id: tenant }, { _id: otherTenant }]);
+    await mongoose.connection.collection("tenants").insertMany([
+      { _id: tenant, slug: "postal-voucher-studio" },
+      { _id: otherTenant, slug: "other-postal-voucher-studio" },
+    ]);
   });
   afterAll(async () => {
     await mongoose.disconnect();

@@ -2,14 +2,8 @@ name: Server CI
 
 on:
   pull_request:
-    paths-ignore:
-      - "**/*.md"
-      - "docs/**"
   push:
     branches: [main]
-    paths-ignore:
-      - "**/*.md"
-      - "docs/**"
   workflow_dispatch:
 
 permissions:
@@ -20,18 +14,98 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  quality:
-    name: Build and critical tests
+  validation:
+    name: Find reusable PR validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+    outputs:
+      reused: ${{ steps.evidence.outputs.reused }}
+      source_url: ${{ steps.evidence.outputs.source_url }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Verify evidence for the exact merged source
+        id: evidence
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          CI_VALIDATION_WORKFLOW: .github/workflows/server-ci.yml
+        run: node scripts/ci/validation-evidence.mjs reuse
+
+  build:
+    name: Build and safety guards
+    needs: validation
+    if: ${{ needs.validation.outputs.reused != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
       CI: "true"
       NODE_ENV: test
       TZ: UTC
+      OPENAI_API_KEY: ""
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install locked dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Verify release-evidence guards
+        run: node --test tests/ci/*.test.mjs
+
+      - name: Verify rollback rehearsal isolation guards
+        run: node --test tests/rollback/safety.test.mjs tests/rollback/redis-isolation.test.mjs
+
+      - name: Build production server
+        run: npm run build
+
+  coverage:
+    name: Complete coverage suite
+    needs: validation
+    if: ${{ needs.validation.outputs.reused != 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      CI: "true"
+      NODE_ENV: test
+      TZ: UTC
       RUN_MONGO_INTEGRATION_TESTS: "true"
+      REDIS_URL: redis://127.0.0.1:6379
       MONGOMS_DOWNLOAD_DIR: ${{ github.workspace }}/.cache/mongodb-binaries
       OPENAI_API_KEY: ""
       TEST_REDIS_SERVER: /usr/bin/redis-server
+
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
 
     steps:
       - name: Check out repository
@@ -58,9 +132,71 @@ jobs:
       - name: Install disposable scheduler test Redis
         run: sudo apt-get update && sudo apt-get install -y redis-server
 
-      - name: Run production-critical tests
-        run: npm run test:critical
+      # The full suite includes every critical test; do not run that subset again.
+      - name: Run all tests with coverage
+        run: npm run test:coverage
 
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: server-coverage-${{ github.run_id }}-${{ github.run_attempt }}
+          path: coverage
+          if-no-files-found: error
+          retention-days: 7
 
-      - name: Build production server
-        run: npm run build
+  quality:
+    # Preserve the existing status-check name for branch and deployment gates.
+    name: Build and critical tests
+    if: ${{ always() }}
+    needs: [validation, build, coverage]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require verified evidence or a successful build and complete suite
+        env:
+          VALIDATION_RESULT: ${{ needs.validation.result }}
+          REUSED: ${{ needs.validation.outputs.reused }}
+          SOURCE_URL: ${{ needs.validation.outputs.source_url }}
+          BUILD_RESULT: ${{ needs.build.result }}
+          COVERAGE_RESULT: ${{ needs.coverage.result }}
+        run: |
+          if [ "$VALIDATION_RESULT" != "success" ]; then
+            echo "::error::Evidence lookup did not complete successfully."
+            exit 1
+          fi
+          if [ "$REUSED" = "true" ]; then
+            printf 'Validated identical merged source using %s.\n' "$SOURCE_URL" >> "$GITHUB_STEP_SUMMARY"
+          elif [ "$BUILD_RESULT" = "success" ] && [ "$COVERAGE_RESULT" = "success" ]; then
+            echo "Production build, safety guards and the complete coverage suite passed." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::error::Build=$BUILD_RESULT; coverage=$COVERAGE_RESULT"
+            exit 1
+          fi
+
+      - name: Check out validated repository
+        if: ${{ needs.validation.outputs.reused != 'true' && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.base.ref == 'main' }}
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        if: ${{ needs.validation.outputs.reused != 'true' && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.base.ref == 'main' }}
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Record fresh validation evidence
+        if: ${{ needs.validation.outputs.reused != 'true' && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.base.ref == 'main' }}
+        env:
+          CI_VALIDATION_WORKFLOW: .github/workflows/server-ci.yml
+        run: node scripts/ci/validation-evidence.mjs record
+
+      - name: Upload fresh validation evidence
+        if: ${{ needs.validation.outputs.reused != 'true' && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.base.ref == 'main' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: validation-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: validation-evidence.json
+          if-no-files-found: error
+          retention-days: 7

@@ -281,12 +281,12 @@ const resolveMail = async (
     locale === "cs"
       ? {
           [WAITLIST_EMAIL_TYPE.VERIFY]: {
-            subject: `Ověřte čekací listinu – ${tenant.name}`,
-            body: "Potvrďte e-mail, abychom vás mohli zařadit do čekací listiny.",
+            subject: `Ověřte žádost na waiting list – ${tenant.name}`,
+            body: "Potvrďte e-mail, abychom vás mohli zařadit na waiting list.",
           },
           [WAITLIST_EMAIL_TYPE.JOINED]: {
-            subject: `Jste v čekací listině – ${course}`,
-            body: "Vaše místo v čekací listině je potvrzeno.",
+            subject: `Jste na waiting listu – ${course}`,
+            body: "Vaše místo na waiting listu je potvrzeno.",
           },
           [WAITLIST_EMAIL_TYPE.OFFERED]: {
             subject: `Uvolnilo se místo – ${course}`,
@@ -297,12 +297,12 @@ const resolveMail = async (
             body: "Čas pro přijetí nabídky vypršel a místo bylo nabídnuto dalšímu zájemci.",
           },
           [WAITLIST_EMAIL_TYPE.WITHDRAWN]: {
-            subject: `Odhlášení z čekací listiny – ${course}`,
-            body: "Vaše odhlášení z čekací listiny bylo potvrzeno.",
+            subject: `Odhlášení z waiting listu – ${course}`,
+            body: "Vaše odhlášení z waiting listu bylo potvrzeno.",
           },
           [WAITLIST_EMAIL_TYPE.CANCELLED]: {
-            subject: `Čekací listina byla zrušena – ${course}`,
-            body: "Studio zrušilo tuto položku čekací listiny.",
+            subject: `Záznam na waiting listu byl zrušen – ${course}`,
+            body: "Studio zrušilo tento záznam na waiting listu.",
           },
           [WAITLIST_EMAIL_TYPE.REFUNDED]: {
             subject: `Platba byla vrácena – ${course}`,
@@ -311,12 +311,12 @@ const resolveMail = async (
         }
       : {
           [WAITLIST_EMAIL_TYPE.VERIFY]: {
-            subject: `Verify your waitlist request – ${tenant.name}`,
-            body: "Verify your email so we can add you to the waitlist.",
+            subject: `Verify your waiting list request – ${tenant.name}`,
+            body: "Verify your email so we can add you to the waiting list.",
           },
           [WAITLIST_EMAIL_TYPE.JOINED]: {
-            subject: `You're on the waitlist – ${course}`,
-            body: "Your place on the waitlist is confirmed.",
+            subject: `You're on the waiting list – ${course}`,
+            body: "Your place on the waiting list is confirmed.",
           },
           [WAITLIST_EMAIL_TYPE.OFFERED]: {
             subject: `A place is available – ${course}`,
@@ -327,12 +327,12 @@ const resolveMail = async (
             body: "The offer window ended and the place was released to the next customer.",
           },
           [WAITLIST_EMAIL_TYPE.WITHDRAWN]: {
-            subject: `Waitlist withdrawal confirmed – ${course}`,
-            body: "Your waitlist withdrawal is confirmed.",
+            subject: `Waiting list withdrawal confirmed – ${course}`,
+            body: "Your waiting list withdrawal is confirmed.",
           },
           [WAITLIST_EMAIL_TYPE.CANCELLED]: {
-            subject: `Waitlist entry cancelled – ${course}`,
-            body: "The studio cancelled this waitlist entry.",
+            subject: `Waiting list entry cancelled – ${course}`,
+            body: "The studio cancelled this waiting list entry.",
           },
           [WAITLIST_EMAIL_TYPE.REFUNDED]: {
             subject: `Payment refunded – ${course}`,
@@ -361,8 +361,8 @@ const resolveMail = async (
   const managementText =
     managementLink && managementLink !== link
       ? locale === "cs"
-        ? `\n\nSpravovat čekací listinu: ${managementLink}`
-        : `\n\nManage waitlist: ${managementLink}`
+        ? `\n\nSpravovat waiting list: ${managementLink}`
+        : `\n\nManage waiting list: ${managementLink}`
       : "";
   const text = `${greeting},\n\n${selected.body}${detailsText}${linkText}${managementText}`;
   const html = `<p>${escapeHtml(greeting)},</p><p>${escapeHtml(
@@ -376,13 +376,13 @@ const resolveMail = async (
   }${
     link
       ? `<p><a href="${escapeHtml(link)}">${
-          locale === "cs" ? "Otevřít čekací listinu" : "Open waitlist"
+          locale === "cs" ? "Otevřít waiting list" : "Open waiting list"
         }</a></p>`
       : ""
   }${
     managementLink && managementLink !== link
       ? `<p><a href="${escapeHtml(managementLink)}">${
-          locale === "cs" ? "Spravovat čekací listinu" : "Manage waitlist"
+          locale === "cs" ? "Spravovat waiting list" : "Manage waiting list"
         }</a></p>`
       : ""
   }`;

@@ -79,6 +79,24 @@ describe("tenant access wire validation", () => {
     ).toThrow();
   });
 
+  it.each(["emailReadyBannerDismissed", "overviewAttentionDismissed"])(
+    "accepts only boolean values for %s",
+    (preference) => {
+      for (const value of [true, false]) {
+        expect(
+          workspacePreferencesInputSchema.parse({ [preference]: value }),
+        ).toEqual({ [preference]: value });
+      }
+
+      for (const value of ["true", 1, null, {}]) {
+        expect(
+          workspacePreferencesInputSchema.safeParse({ [preference]: value })
+            .success,
+        ).toBe(false);
+      }
+    },
+  );
+
   it("accepts versioned product tour completion and celebration state", () => {
     expect(
       workspacePreferencesInputSchema.parse({

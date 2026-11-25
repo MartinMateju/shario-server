@@ -3890,6 +3890,9 @@ export const buildWorkspaceAssistantContext = async ({
             compactText(report.metadata?.currency, 3).toUpperCase() || null,
           locationId: compactText(report.metadata?.locationId, 100) || null,
           generatedAt: report.metadata?.generatedAt || now.toISOString(),
+          moneyBasis: compactText(report.metadata?.moneyBasis, 80) || null,
+          refundBasis: compactText(report.metadata?.refundBasis, 80) || null,
+          cashAsOf: report.metadata?.cashAsOf || null,
         },
         comparisonPeriod: report.metadata?.comparisonPeriod
           ? {

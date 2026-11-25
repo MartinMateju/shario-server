@@ -29,7 +29,9 @@ app.use((error: any, _req: any, res: any, _next: any) => {
 describe("private-bucket public image delivery", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    publicMediaLimiter.resetKey("::ffff:127.0.0.1");
+    // Loopback may be reported as IPv4, mapped IPv4 or IPv6 depending on the host.
+    for (const key of ["::ffff:127.0.0.1", "127.0.0.1", "::1", "::1/56", "::/56"])
+      publicMediaLimiter.resetKey(key);
     storage.metadata.mockResolvedValue({
       contentType: "image/png",
       contentLength: 1024,

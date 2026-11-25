@@ -31,6 +31,12 @@ import {
   revokeTeamInvitation,
 } from "@/modules/tenant-access/services/team-invitation.service.js";
 import { loginUser } from "@/modules/auth/services/auth.service.js";
+import { resolveWorkspaceAccessForUser } from "@/modules/tenant-access/services/authorization.service.js";
+import {
+  addExistingTenantUserToTeam,
+  revokeTeamMember,
+  updateTeamMember,
+} from "@/modules/tenant-access/services/team.service.js";
 import {
   acceptPublicTeamInvitation,
   previewPublicTeamInvitation,
@@ -103,6 +109,27 @@ const seedWorkspace = async (slug = "invitations-alpha") => {
   return { tenant, tenantId, actorUserId, ownerMembership };
 };
 type Workspace = Awaited<ReturnType<typeof seedWorkspace>>;
+const teamActor = async (context: Workspace) => ({
+  tenantId: context.tenantId,
+  actorUserId: context.actorUserId,
+  actorAccess: (await resolveWorkspaceAccessForUser({
+    tenantId: context.tenantId,
+    userId: context.actorUserId,
+  }))!,
+});
+const seedTeamMember = async (context: Workspace) => {
+  const userId = await seedUser(context.tenantId, EMAIL);
+  const actor = await teamActor(context);
+  const membership = await addExistingTenantUserToTeam({
+    ...actor,
+    input: {
+      email: EMAIL,
+      roleKey: "viewer",
+      locationAccess: { mode: "all", locationIds: [] },
+    },
+  });
+  return { userId, actor, membershipId: membership.membershipId };
+};
 
 const latestToken = () => {
   const message = delivery.send.mock.calls.at(-1)?.[0];
@@ -209,13 +236,11 @@ describe("team invitations with real tenant transactions", () => {
       collections.map((collection) => collection.deleteMany({})),
     );
     userSequence = 0;
-    delivery.send
-      .mockReset()
-      .mockResolvedValue({
-        provider: "postmark",
-        providerMessageId: "isolated-invitation",
-        status: "sent",
-      });
+    delivery.send.mockReset().mockResolvedValue({
+      provider: "postmark",
+      providerMessageId: "isolated-invitation",
+      status: "sent",
+    });
   });
 
   it("keeps pending access inert and stores only a hash of the emailed token", async () => {
@@ -343,6 +368,163 @@ describe("team invitations with real tenant transactions", () => {
       tenant: context.tenant,
     });
     expect(login.authContext).toBe("workspace");
+  });
+
+  it("re-invites a removed member with a new role and locations while preserving the account", async () => {
+    const context = await seedWorkspace();
+    const { userId, actor, membershipId } = await seedTeamMember(context);
+    const location = await Location.create({
+      tenant: context.tenantId,
+      name: "Vaclavska",
+    });
+    const removed = await revokeTeamMember({ ...actor, membershipId });
+    const fields = {
+      roleKey: "manager",
+      locationAccess: { mode: "selected", locationIds: [String(location._id)] },
+      workspaceProfile: {
+        displayName: "Eva",
+        jobTitle: "Manager",
+        calendarColor: "#ed9eeb",
+      },
+    };
+    const created = await invite(context, EMAIL, fields);
+    expect(String(created.saved.membership)).toBe(membershipId);
+    expect(created.saved.membershipAccessVersion).toBe(
+      removed.authorizationVersion,
+    );
+    expect((await Membership.findById(membershipId))!.status).toBe("revoked");
+    await expect(invite(context, EMAIL, fields)).rejects.toMatchObject({
+      code: "TEAM_INVITATION_EXISTS",
+    });
+    await expect(
+      acceptTeamInvitation({ token: created.token, password: NEW_PASSWORD }),
+    ).rejects.toMatchObject({ code: "TEAM_INVITATION_CREDENTIALS_INVALID" });
+    const accepted = await acceptTeamInvitation({
+      token: created.token,
+      password: CURRENT_PASSWORD,
+    });
+    expect(accepted.membershipId).toBe(membershipId);
+    expect(
+      await Membership.countDocuments({
+        tenant: context.tenantId,
+        user: userId,
+      }),
+    ).toBe(1);
+    const access = await resolveWorkspaceAccessForUser({
+      tenantId: context.tenantId,
+      userId,
+    });
+    expect(access).toMatchObject({
+      role: "manager",
+      status: "active",
+      locationAccess: fields.locationAccess,
+      workspaceProfile: fields.workspaceProfile,
+      accessVersion: removed.authorizationVersion + 1,
+    });
+    expect(
+      await User.findById(userId).select("+password").lean(),
+    ).toMatchObject({
+      firstname: "Existing",
+      lastname: "Person",
+      password: passwordHash,
+      credits: 75,
+    });
+    expect(
+      await User.countDocuments({ tenant: context.tenantId, email: EMAIL }),
+    ).toBe(1);
+  });
+
+  it.each(["active", "suspended"] as const)(
+    "keeps %s memberships in member controls instead of creating another invitation",
+    async (status) => {
+      const context = await seedWorkspace();
+      const { actor, membershipId } = await seedTeamMember(context);
+      if (status === "suspended") {
+        await updateTeamMember({ ...actor, membershipId, input: { status } });
+      }
+      await expect(invite(context)).rejects.toMatchObject({
+        code: "TENANT_MEMBERSHIP_EXISTS",
+      });
+      expect(delivery.send).not.toHaveBeenCalled();
+    },
+  );
+
+  it("replaces a removed member's obsolete sign-in invitation with a fresh join invitation", async () => {
+    const context = await seedWorkspace();
+    const { actor, membershipId } = await seedTeamMember(context);
+    const signIn = await createTeamSignInInvitation({
+      ...context,
+      membershipId,
+    });
+    const oldToken = latestToken();
+    await revokeTeamMember({ ...actor, membershipId });
+    await expect(
+      acceptTeamInvitation({ token: oldToken, password: CURRENT_PASSWORD }),
+    ).rejects.toMatchObject({ code: "TEAM_INVITATION_MEMBERSHIP_CHANGED" });
+    const fresh = await invite(context, EMAIL, { roleKey: "manager" });
+    expect((await Invitation.findById(signIn.id))!.status).toBe("revoked");
+    await expect(
+      acceptTeamInvitation({ token: oldToken, password: CURRENT_PASSWORD }),
+    ).rejects.toMatchObject({ code: "TEAM_INVITATION_INVALID" });
+    await acceptTeamInvitation({
+      token: fresh.token,
+      password: CURRENT_PASSWORD,
+    });
+    expect((await Membership.findById(membershipId))!.role).toBe("manager");
+  });
+
+  it("does not let a re-invitation overwrite access changed after it was sent", async () => {
+    const context = await seedWorkspace();
+    const { actor, membershipId } = await seedTeamMember(context);
+    await revokeTeamMember({ ...actor, membershipId });
+    const obsolete = await invite(context, EMAIL, { roleKey: "manager" });
+    await updateTeamMember({
+      ...actor,
+      membershipId,
+      input: { status: "active", roleKey: "staff" },
+    });
+    await revokeTeamMember({ ...actor, membershipId });
+    await allowResend(obsolete.invitationId);
+    delivery.send.mockClear();
+    await expect(
+      resendTeamInvitation({ ...context, invitationId: obsolete.invitationId }),
+    ).rejects.toMatchObject({ code: "TEAM_INVITATION_MEMBERSHIP_CHANGED" });
+    expect(delivery.send).not.toHaveBeenCalled();
+    await expect(
+      acceptTeamInvitation({
+        token: obsolete.token,
+        password: CURRENT_PASSWORD,
+      }),
+    ).rejects.toMatchObject({ code: "TENANT_MEMBERSHIP_EXISTS" });
+    expect((await Membership.findById(membershipId))!.status).toBe("revoked");
+    const fresh = await invite(context, EMAIL, { roleKey: "viewer" });
+    expect((await Invitation.findById(obsolete.invitationId))!.status).toBe(
+      "revoked",
+    );
+    await acceptTeamInvitation({
+      token: fresh.token,
+      password: CURRENT_PASSWORD,
+    });
+    expect((await Membership.findById(membershipId))!.role).toBe("viewer");
+  });
+
+  it("does not let an original join invitation restore a subsequently added and removed member", async () => {
+    const context = await seedWorkspace();
+    const original = await invite(context, EMAIL, { roleKey: "manager" });
+    const { actor, membershipId } = await seedTeamMember(context);
+    await revokeTeamMember({ ...actor, membershipId });
+    await expect(
+      acceptTeamInvitation({
+        token: original.token,
+        password: CURRENT_PASSWORD,
+      }),
+    ).rejects.toMatchObject({ code: "TENANT_MEMBERSHIP_EXISTS" });
+    const fresh = await invite(context, EMAIL, { roleKey: "viewer" });
+    await acceptTeamInvitation({
+      token: fresh.token,
+      password: CURRENT_PASSWORD,
+    });
+    expect((await Membership.findById(membershipId))!.role).toBe("viewer");
   });
 
   it("never adopts or changes another tenant's same-email identity", async () => {

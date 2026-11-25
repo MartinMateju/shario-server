@@ -1,5 +1,6 @@
 import mongoose from "mongoose";
 import { z } from "zod";
+import { partialWithoutDefaults } from "@/shared/validation/partialWithoutDefaults.js";
 
 import {
   DEFAULT_EVENT_LIMIT,
@@ -96,12 +97,12 @@ const baseEventSchema = z.object(eventShape);
 
 export const createEventSchema = baseEventSchema.superRefine(validateEventFields);
 
-export const updateEventSchema = z
-  .object({
+export const updateEventSchema = partialWithoutDefaults(
+  z.object({
     ...eventShape,
     id: objectIdSchema("event id"),
-  })
-  .partial()
+  }),
+)
   .extend({
     id: objectIdSchema("event id"),
   })

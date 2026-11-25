@@ -26,6 +26,7 @@ import type { StudioCommerceCurrency } from "@/shared/money/currency.js";
 import type {
   CustomerPortalNavigationKey,
   CustomerPortalPageId,
+  CustomerPortalPageImageKey,
   PublicSiteFontPreset,
   PublicSiteHomeSection,
   PublicSiteNavItem,
@@ -147,6 +148,26 @@ export type TenantPublicSiteLocalizedText = Record<
   string
 >;
 
+export type TenantPublicSiteCustomLink = {
+  id: string;
+  label: TenantPublicSiteLocalizedText;
+  href: TenantPublicSiteLocalizedText;
+};
+
+export type TenantPublicSiteHeaderChildLink = TenantPublicSiteCustomLink & {
+  separatorBefore?: boolean;
+};
+
+export type TenantPublicSiteHeaderLink =
+  | (TenantPublicSiteCustomLink & { emphasis?: "button"; children?: never })
+  | {
+      id: string;
+      label: TenantPublicSiteLocalizedText;
+      children: TenantPublicSiteHeaderChildLink[];
+      href?: never;
+      emphasis?: never;
+    };
+
 export type TenantPublicSite = {
   branding: {
     displayName: string;
@@ -183,6 +204,11 @@ export type TenantPublicSite = {
     labelColor: string;
   };
   header: {
+    layout: "default" | "website";
+    backgroundColor: string;
+    linkColor: string;
+    buttonColor: string;
+    customLinks: TenantPublicSiteHeaderLink[];
     navOrder: PublicSiteNavItem[];
     hiddenItems: PublicSiteNavItem[];
     primaryCta: PublicSitePrimaryCta;
@@ -192,6 +218,7 @@ export type TenantPublicSite = {
     };
   };
   footer: {
+    customLinks: TenantPublicSiteCustomLink[];
     description: TenantPublicSiteLocalizedText;
     openingHours: TenantPublicSiteLocalizedText;
     copyright: TenantPublicSiteLocalizedText;
@@ -255,6 +282,7 @@ export type TenantPublicSite = {
     };
   };
   customerPortal: {
+    pageImages: Record<CustomerPortalPageImageKey, string>;
     pages: Record<CustomerPortalPageId, { enabled: boolean }>;
     navigation: Record<CustomerPortalNavigationKey, { visible: boolean }>;
     appearance: PortalAppearance;

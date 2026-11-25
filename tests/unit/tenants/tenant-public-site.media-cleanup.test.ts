@@ -160,4 +160,39 @@ describe("public-site media reference cleanup", () => {
     });
     expect(mocks.deleteObjectFromR2).toHaveBeenCalledWith({ key: "public-sites/tenant-1/courseHero/photo.png" });
   });
+
+  it("retains page images referenced by another page, publication or version and deletes only abandoned tenant assets", async () => {
+    const hero = "https://media.shario.test/public-sites/tenant-1/membershipsHero/photo.png";
+    const pageSite = (pageImages: Record<string, string>) => ({ customerPortal: { pageImages } }) as never;
+    const beforeDraft = pageSite({ memberships: hero });
+    await cleanupDiscardedPublicSiteMedia({
+      tenantId: "tenant-1", beforeDraft, afterDraft: pageSite({ vouchers: hero }), published: site(),
+    });
+    await cleanupDiscardedPublicSiteMedia({
+      tenantId: "tenant-1", beforeDraft, afterDraft: site(), published: pageSite({ memberships: hero }),
+    });
+    const select = vi.fn(() => ({ lean: () => ({ exec: async () => [
+      { snapshot: pageSite({ memberships: hero }) },
+    ] }) }));
+    mocks.findVersions.mockReturnValueOnce({ select });
+    await cleanupDiscardedPublicSiteMedia({
+      tenantId: "tenant-1", beforeDraft, afterDraft: site(), published: site(),
+    });
+    expect(select).toHaveBeenCalledWith(expect.stringContaining("snapshot.customerPortal.pageImages"));
+    expect(mocks.findVersions).toHaveBeenLastCalledWith({ tenant: "tenant-1" });
+    expect(mocks.deleteObjectFromR2).not.toHaveBeenCalled();
+
+    await cleanupDiscardedPublicSiteMedia({
+      tenantId: "tenant-1",
+      beforeDraft: pageSite({
+        memberships: hero,
+        courses: "https://media.shario.test/public-sites/tenant-2/coursesHero/photo.png",
+        credits: "https://cdn.example.test/photo.png",
+      }),
+      afterDraft: site(), published: site(),
+    });
+    expect(mocks.deleteObjectFromR2).toHaveBeenCalledExactlyOnceWith({
+      key: "public-sites/tenant-1/membershipsHero/photo.png",
+    });
+  });
 });

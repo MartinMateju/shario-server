@@ -1,3 +1,4 @@
+import mongoose from "mongoose";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -18,6 +19,10 @@ vi.mock(
   }),
 );
 
+vi.mock("@/modules/membership/user-membership.model.js", () => ({ default: { updateOne: vi.fn().mockResolvedValue({ modifiedCount: 1 }) } }));
+vi.mock("@/modules/tenant-payments/payment-refund-reconciliation.model.js", () => ({
+  PaymentRefundReconciliation: { findOne: vi.fn(() => ({ session: () => ({ lean: () => ({ exec: async () => null }) }) })) },
+}));
 import { syncMembershipInvoice } from "@/modules/membership/services/membership-invoice.service.js";
 
 const invoice = {
@@ -45,6 +50,7 @@ const membership = {
 
 describe("membership invoice sync", () => {
   beforeEach(() => {
+    vi.spyOn(mongoose.connection, "transaction").mockImplementation(async (write: any) => write({}));
     mocks.exec.mockReset().mockResolvedValue({ _id: "local_invoice_123" });
     mocks.findOneAndUpdate.mockReset().mockReturnValue({ exec: mocks.exec });
     mocks.retrieveInvoice.mockReset().mockResolvedValue(invoice);

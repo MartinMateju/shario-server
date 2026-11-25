@@ -10,11 +10,14 @@ import {
 } from "@/shared/i18n/communication-locales.js";
 
 import { formatDateTimeRange } from "../access-code.utils.js";
+import { renderDoorAccessEmailTemplate } from "../door-access-email-template.js";
+import { resolveDoorAccessEmailTemplate } from "./door-access-email-template.service.js";
 
 type SendAccessCodeEmailInput = {
   to: string;
   tenantId?: string;
   bookingId?: string;
+  locationId?: string;
   deliveryId?: string;
   studioName: string;
   studioAddress?: string;
@@ -111,7 +114,32 @@ export async function sendAccessCodeEmail(
     );
   }
   const customerBookingLink = await resolveCustomerBookingLink(input.tenantId);
-  const email = buildAccessCodeEmail(input, customerBookingLink);
+  const template = input.locationId
+    ? await resolveDoorAccessEmailTemplate(input.tenantId, input.locationId)
+    : null;
+  const locale = resolveCommunicationContentLocale(
+    customerBookingLink?.locale,
+    customerBookingLink
+      ? COMMUNICATION_CONTENT_LOCALE.EN
+      : COMMUNICATION_CONTENT_LOCALE.CS,
+  );
+  const contentLocale = template?.contentVariants[locale]
+    ? locale
+    : template?.defaultLocale || locale;
+  const email = template
+    ? renderDoorAccessEmailTemplate(template, contentLocale, {
+        entryCode: input.entryCode,
+        studioName: input.studioName,
+        studioAddress: input.studioAddress || "",
+        bookingTime: formatDateTimeRange(
+          input.bookingStart,
+          input.bookingEnd,
+          input.timezone,
+          contentLocale,
+        ),
+        bookingUrl: customerBookingLink?.url || "",
+      })
+    : buildAccessCodeEmail(input, customerBookingLink);
   const messageId = `<access-code-${input.tenantId}-${input.bookingId}-${input.bookingStart.getTime()}@shario.io>`;
 
   const result = await sendManagedTenantEmail({

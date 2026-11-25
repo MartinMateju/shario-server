@@ -2,6 +2,7 @@ import type { CommunicationEmailLogListFilters } from "../communication-email-lo
 import type { ListCommunicationEmailLogsInput } from "../communication-email-log.validators.js";
 import { communicationEmailLogRepository } from "../communication-email-log.repository.js";
 import type { AllowedWorkspaceLocationIds } from "@/modules/tenant-access/index.js";
+import { decorateCommunicationEmailLogs } from "./communication-email-log-retry.service.js";
 
 export const communicationEmailLogService = {
   async list(
@@ -25,7 +26,7 @@ export const communicationEmailLogService = {
     const totalPages = Math.ceil(totalCount / limit);
 
     return {
-      logs,
+      logs: await decorateCommunicationEmailLogs(tenantId, logs),
       totalCount,
       totalPages,
       currentPage: page,

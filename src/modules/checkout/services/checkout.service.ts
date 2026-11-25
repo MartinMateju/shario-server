@@ -870,6 +870,7 @@ export const checkoutService = {
       workshopBookings: workshopBookingsToCreate,
       currentBookings,
       locationById,
+      enforceTimeRules: !cartItems.some((item) => item.bookingExtension),
     });
 
     const courseCapacityReservations = await loadCourseBookings({
@@ -1236,7 +1237,12 @@ export const checkoutService = {
           path: cancelPath,
           ...(voucherPlan
             ? { query: { orderId: String(orderId), voucher: "1" } }
-            : {}),
+            : workshopBookingsToCreate.length > 0 &&
+                workshopBookingsToCreate.length === cartItems.length &&
+                !waitlistContext &&
+                !cartItems.some((item) => item.bookingExtension)
+              ? { query: { orderId: String(orderId) } }
+              : {}),
         }),
         expires_at: checkoutExpiry.sessionExpiresAtSeconds,
         client_reference_id: String(orderId),
@@ -1551,6 +1557,7 @@ export const checkoutService = {
       workshopBookings: workshopBookingsToCreate,
       currentBookings,
       locationById,
+      enforceTimeRules: !cartItems.some((item) => item.bookingExtension),
     });
 
     const courseCapacityReservations = await loadCourseBookings({

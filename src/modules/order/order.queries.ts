@@ -9,6 +9,9 @@ type OrderQuery = Record<string, unknown>;
 
 export const buildPaidOrderNotificationBaseQuery = (): OrderQuery => ({
   isPaid: true,
+  "refund.reviewRequired": { $ne: true },
+  "refund.succeededAmountMinor": { $not: { $gt: 0 } },
+  "refund.pendingAmountMinor": { $not: { $gt: 0 } },
   legacyOrder: { $ne: true },
   status: { $nin: [ORDER_STATUS.FAILED, ORDER_STATUS.CANCELLED] },
 });

@@ -2,9 +2,52 @@
 
 This is an operator procedure, not evidence that a deployment or rollback was performed. Database restoration, backup verification and Atlas administration are outside this procedure. Preserve committed financial and delivery records through any code rollback.
 
+For the November operational increment, use [operational alerts](operational-alerts.md)
+for the owner, configuration, synthetic inbox-delivery evidence and activation
+gate. The paired client's `docs/rollback-rehearsal.md` describes the isolated
+five-process drill and its retained report. A passing local process drill does
+not establish that Render/Vercel deployment controls or database restoration
+have been rehearsed. Keep those evidence categories separate in the release record.
+
 ## Record and validate the release
 
-Record the operator, UTC time, exact client/server commit SHAs, CI URLs, deployment URLs and previous compatible client/server deployment IDs in the release record. Branch names and a green run for an older source revision are insufficient. If a merge changes runtime code, validate that resulting revision before promotion.
+Record the operator, UTC time, exact client/server commit SHAs, CI URLs, deployment URLs and previous compatible client/server deployment IDs in the release record. Branch names and a green run for an older source revision are insufficient. If a merge changes any tracked source, validate that resulting revision before promotion.
+
+### Validate once for unchanged merges
+
+`Server CI` runs the production build, safety guards and complete coverage suite
+on every pull request. The full suite includes the critical selection, so that
+subset is not run a second time. The production build also typechecks production
+sources; a second `--noEmit` pass is unnecessary in the same validation.
+
+On a main push, the workflow first looks for successful validation of the merged
+pull request. Reuse requires an exact match of the complete Git tree, including
+workflows, scripts and dependency lockfiles. The evidence must come from the
+latest attempt of this repository's expected PR workflow, which must have
+completed successfully, be tied to the same merged PR/head, and be no more than
+seven days old. Fork runs, missing or
+expired artifacts, mismatched trees, incomplete/failed runs and unverifiable
+evidence do not qualify. An unsuccessful lookup falls back to fresh validation;
+it never grants a passing release result.
+
+The stable `Build and critical tests` check succeeds only after either fresh
+build/coverage success or verified reuse. Its summary links the original run.
+Fresh same-repository PRs targeting main retain
+`validation-evidence-<run-id>-<attempt>`; reused runs do not create replacement
+evidence or extend its lifetime. Record the source run URL
+with the release. A green check whose summary claims reuse is meaningful only
+because the verifier proved this source match; a skipped test by itself is not
+release evidence.
+
+The client's paired smoke also binds the tested backend Git tree. If the backend
+changes, require a new smoke run for the intended source pair. Do not rerun a
+successful smoke merely because a merge created a new commit ID with identical
+source. A different production configuration still requires its own build and
+live verification.
+
+`Server full regression` remains available on the daily schedule and manual
+dispatch. These runs deliberately start fresh to catch environmental drift or
+diagnose failures; they are not an additional automatic step for every merge.
 
 Evidence snapshot for the 2026-10-21 readiness candidate:
 
@@ -17,8 +60,8 @@ Evidence snapshot for the 2026-10-21 readiness candidate:
 Update this record for later commits and runs; these rows do not certify a newer revision or its production deployment. The [operations audit](production-readiness-audit-2026-10-21.md) records the earlier live revisions and saved deployment settings separately.
 
 1. Review the client/API contract and migration/index changes against the current production revision. Identify additive fields, startup index checks, changed unique constraints and queue payload formats. Review applicable [product-location migration constraints](migrations/product-locations.md), [product kinds](migrations/product-kinds-v2.md), [Stripe Connect](stripe-connect.md) and voucher migration notes before applying anything. Inspect the relevant migration's plan/dry-run and approve its exact changes separately; do not run every migration or drop/rebuild indexes as routine deployment preparation.
-2. Require successful client CI, server critical tests/build, relevant full regression, and the paired release smoke for the intended source pair. Keep Render **After CI Checks Pass** and Vercel **Release ready: Blocking** enabled; inspect actual check conclusions, because skipped/neutral checks are not evidence that a required test executed.
-3. Run the paired browser smoke using the client's `Release smoke` workflow with `server_ref` pinned to the full server SHA. It uses an isolated database and local provider substitutes. Verify registration/sender setup, tenant isolation, paid studio-credit booking, persisted debit, failed cancellation without success UI, confirmed cancellation with one credit restoration, and repeated cancellation without another refund. Server regression must also pass signed payment settlement/replay and cancellation rollback tests. A real Stripe test-mode or provider-delivery check, if needed, belongs in the designated test environment; these fixtures do not establish real-provider delivery.
+2. Require successful client CI and the server's `Build and critical tests` gate, which covers the production build, safety guards and full coverage suite. Inspect their fresh-validation or verified-reuse evidence for the intended source pair. Preserve existing hosting gates and manual commit pins; keep Vercel **Release ready: Blocking** enabled. A skipped/neutral check alone is not evidence that a required test executed.
+3. Use the client's successful paired smoke evidence for the intended source pair. If none qualifies, run its `Release smoke` workflow with `server_ref` pinned to the full server SHA. It uses an isolated database and local provider substitutes. Verify registration/sender setup, tenant isolation, paid studio-credit booking, persisted debit, failed cancellation without success UI, confirmed cancellation with one credit restoration, and repeated cancellation without another refund. Server coverage must also pass signed payment settlement/replay and cancellation rollback tests. A real Stripe test-mode or provider-delivery check, if needed, belongs in the designated test environment; these fixtures do not establish real-provider delivery.
 
 ## Deploy and verify
 

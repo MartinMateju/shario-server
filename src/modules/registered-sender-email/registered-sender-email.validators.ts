@@ -1,5 +1,6 @@
 import mongoose from "mongoose";
 import { z } from "zod";
+import { partialWithoutDefaults } from "@/shared/validation/partialWithoutDefaults.js";
 
 const objectIdSchema = (fieldName = "id") =>
   z
@@ -38,7 +39,7 @@ export const createRegisteredSenderEmailSchema = z
   .strict();
 
 export const updateRegisteredSenderEmailSchema =
-  createRegisteredSenderEmailSchema.partial().strict();
+  partialWithoutDefaults(createRegisteredSenderEmailSchema).strict();
 
 export const confirmReplyToVerificationSchema = z
   .object({

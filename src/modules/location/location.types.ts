@@ -59,6 +59,7 @@ export type Location = {
     OpeningHoursDay
   >;
   access: {
+    emailTemplate?: import("@/modules/access-codes/door-access-email-template.js").DoorAccessEmailTemplate;
     automaticEmailEnabled?: boolean;
     publicInstructions: string;
     privateInstructions: string;

@@ -133,6 +133,7 @@ const planChangeSchema = new Schema({
 
 export const userMembershipSchema = new Schema(
   {
+    refundReconciliationRevision: { type: Number, default: 0 },
     tenant: {
       type: Schema.Types.ObjectId,
       ref: "Tenant",
@@ -320,6 +321,11 @@ userMembershipSchema.index(
   },
 );
 userMembershipSchema.index({ tenant: 1, status: 1, currentPeriodEnd: 1 });
+// Directory lookups must include valid historical records without isOpen:true.
+userMembershipSchema.index(
+  { tenant: 1, user: 1, status: 1, startedAt: -1, _id: -1 },
+  { name: "customer_membership_directory_lookup" },
+);
 userMembershipSchema.index(
   { "stripe.connectedAccountId": 1, "stripe.subscriptionId": 1 },
   {

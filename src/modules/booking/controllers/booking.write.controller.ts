@@ -34,7 +34,7 @@ const assertBookingLocationAccess = async ({
   req: Request;
   tenantId: string;
   bookingId: unknown;
-}): Promise<void> => {
+}): Promise<boolean> => {
   if (!mongoose.isValidObjectId(bookingId)) {
     notFound("Booking not found.");
   }
@@ -47,7 +47,7 @@ const assertBookingLocationAccess = async ({
 
   // Customers do not have workspace memberships. Their ownership is checked
   // by the booking service instead of an employee location assignment.
-  if (!workspaceAccess) return;
+  if (!workspaceAccess) return false;
 
   const booking = await Booking.findOne({
     _id: bookingId,
@@ -63,6 +63,7 @@ const assertBookingLocationAccess = async ({
   ) {
     notFound("Booking not found.");
   }
+  return true;
 };
 
 const requireSelfOrBookingPermissions = async ({
@@ -148,10 +149,32 @@ export const updateBooking = asyncHandler(
   },
 );
 
+/**
+ * Staff cancel from the workspace without knowing who owns the booking, so
+ * default the target to the booking's owner. Cancelling someone else's booking
+ * still requires the cancel and refund permissions checked below.
+ */
+const resolveCancellationTargetUserId = async (
+  req: Request,
+  tenantId: string,
+): Promise<string> => {
+  if (req.body.userId) return String(req.body.userId);
+
+  const booking = await Booking.findOne({
+    _id: req.body.id,
+    tenant: tenantId,
+  })
+    .select("createdBy")
+    .lean<{ createdBy?: unknown } | null>()
+    .exec();
+
+  return String(booking?.createdBy ?? getAuthenticatedUserId(req));
+};
+
 export const cancelBooking = asyncHandler(
   async (req: Request, res: Response) => {
     const tenantId = requireTenantId(req);
-    await assertBookingLocationAccess({
+    const isStaffActor = await assertBookingLocationAccess({
       req,
       tenantId,
       bookingId: req.body.id,
@@ -159,7 +182,7 @@ export const cancelBooking = asyncHandler(
     const userId = await requireSelfOrBookingPermissions({
       req,
       tenantId,
-      targetUserId: String(req.body.userId ?? getAuthenticatedUserId(req)),
+      targetUserId: await resolveCancellationTargetUserId(req, tenantId),
       // The cancellation service also restores or refunds payment. Acting on
       // another user's booking therefore requires both capabilities.
       permissions: [
@@ -173,6 +196,7 @@ export const cancelBooking = asyncHandler(
       bookingId: req.body.id,
       userId,
       actorUserId: getAuthenticatedUserId(req),
+      cancellationActorType: isStaffActor ? "staff" : "customer",
     });
 
     res.json(result);

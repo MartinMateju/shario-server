@@ -16,6 +16,7 @@ import {
   sendCheckout,
   quoteVoucherCheckout,
   cancelVoucherPayment,
+  cancelCheckoutPayment,
   quoteCheckout,
   checkoutWithMembership,
 } from "./controllers/checkout.controller.js";
@@ -129,6 +130,7 @@ router.post(
   checkoutWithCredits,
 );
 router.get("/orders/:orderId/status", getCheckoutOrderStatus);
+router.post("/orders/:orderId/cancel", cancelCheckoutPayment);
 router.post("/orders/:orderId/voucher/cancel", cancelVoucherPayment);
 router.post("/participants/increase-success", confirmIncreaseParticipants);
 router.post("/participants/refund-request", requireVerifiedCustomer, requestRefundParticipants);

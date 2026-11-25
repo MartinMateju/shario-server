@@ -5,6 +5,7 @@ import { Router, type NextFunction, type Response } from "express";
 import { publicTenantLookupLimiter } from "@/modules/checkout/checkout.public-limiter.js";
 import {
   loadPublishedTenant,
+  loadFreshPublishedTenant,
   type PublishedTenantRequest,
 } from "@/modules/setup-center/setup-publication.middleware.js";
 import { getTenantSubscriptionAccess } from "@/modules/tenant-subscription/services/tenant-subscription.service.js";
@@ -14,6 +15,7 @@ import { isCourseBrowsingVisible } from "@/modules/tenants/public-site/tenant-co
 import {
   getPublicCourseSessions,
   getPublicCourseProducts,
+  getPublicCourseOverview,
   getPublicProduct,
   getPublicProducts,
 } from "../controllers/product.controller.js";
@@ -103,12 +105,23 @@ publicProductRouter.get(
 publicProductRouter.get(
   "/tenants/:tenantSlug/products/courses",
   publicTenantLookupLimiter,
-  loadPublishedTenant,
+  loadFreshPublishedTenant,
   requirePublicProductSubscription,
   requirePublicProductModule(TENANT_MODULE.PAYMENTS),
   requirePublicProductModule(TENANT_MODULE.COURSES),
   requirePublicCourseVisibility,
   getPublicCourseProducts,
+);
+
+publicProductRouter.get(
+  "/tenants/:tenantSlug/products/courses/overview",
+  publicTenantLookupLimiter,
+  loadFreshPublishedTenant,
+  requirePublicProductSubscription,
+  requirePublicProductModule(TENANT_MODULE.PAYMENTS),
+  requirePublicProductModule(TENANT_MODULE.COURSES),
+  requirePublicCourseVisibility,
+  getPublicCourseOverview,
 );
 
 publicProductRouter.get(

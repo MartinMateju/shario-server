@@ -211,7 +211,10 @@ describe("membership plan changes at the next monthly renewal", () => {
     await activate();
     const other = await createPlan("Concurrent choice", 520000, "concurrent_hours", 2400);
     const results = await Promise.all([change(), change(other, "concurrent-different-change")]);
-    expect(results.map((response) => response.status).sort()).toEqual([200, 409]);
+    const responseDiagnostics = results.map((response) => ({ status: response.status,
+      ...(response.status >= 400 ? { code: response.body?.code, message: response.body?.message } : {}),
+    }));
+    expect(results.map((response) => response.status).sort(), JSON.stringify(responseDiagnostics)).toEqual([200, 409]);
     expect(stripe.schedules.size).toBe(1);
     expect(stripe.prices.size).toBe(2);
     expect(await Membership.countDocuments()).toBe(1);

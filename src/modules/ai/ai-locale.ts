@@ -81,6 +81,29 @@ export const localizedAiServiceUnavailable = (locale: unknown): string =>
     ro: "Răspunsul localizat în timp real este indisponibil temporar. Încearcă din nou peste câteva momente.",
   });
 
+export const localizedDeterministicCopyNotice = (locale: unknown): string =>
+  aiCopy(locale, {
+    en: "The verified details below are shown in English because the live localized response is unavailable.",
+    cs: "Níže uvedené ověřené údaje jsou zobrazeny v angličtině, protože živá lokalizovaná odpověď není dostupná.",
+    de: "Die verifizierten Angaben unten werden auf Englisch angezeigt, weil die lokalisierte Live-Antwort nicht verfügbar ist.",
+    pl: "Poniższe zweryfikowane informacje są wyświetlane po angielsku, ponieważ zlokalizowana odpowiedź na żywo jest niedostępna.",
+    sk: "Overené údaje nižšie sú zobrazené v angličtine, pretože lokalizovaná odpoveď naživo nie je dostupná.",
+    da: "De verificerede oplysninger nedenfor vises på engelsk, fordi det lokaliserede live-svar ikke er tilgængeligt.",
+    fr: "Les informations vérifiées ci-dessous sont affichées en anglais, car la réponse localisée en direct n’est pas disponible.",
+    es: "La información verificada que aparece a continuación se muestra en inglés porque la respuesta localizada en directo no está disponible.",
+    it: "Le informazioni verificate qui sotto sono mostrate in inglese perché la risposta localizzata in tempo reale non è disponibile.",
+    "pt-PT":
+      "As informações verificadas abaixo são apresentadas em inglês porque a resposta localizada em direto não está disponível.",
+    sv: "De verifierade uppgifterna nedan visas på engelska eftersom det lokaliserade svaret i realtid inte är tillgängligt.",
+    nb: "De verifiserte opplysningene nedenfor vises på engelsk fordi det lokaliserte svaret ikke er tilgjengelig.",
+    fi: "Alla olevat vahvistetut tiedot näytetään englanniksi, koska lokalisoitu reaaliaikainen vastaus ei ole tällä hetkellä saatavilla.",
+    hu: "Az alábbi ellenőrzött adatok angolul jelennek meg, mert a valós idejű, lokalizált válasz nem érhető el.",
+    el: "Οι παρακάτω επαληθευμένες πληροφορίες εμφανίζονται στα αγγλικά, επειδή η απάντηση σε πραγματικό χρόνο στη γλώσσα σας δεν είναι διαθέσιμη.",
+    tr: "Yerelleştirilmiş gerçek zamanlı yanıt kullanılamadığı için aşağıdaki doğrulanmış ayrıntılar İngilizce gösterilmektedir.",
+    nl: "De geverifieerde gegevens hieronder worden in het Engels weergegeven, omdat er momenteel geen antwoord in jouw taal beschikbaar is.",
+    ro: "Detaliile verificate de mai jos sunt afișate în limba engleză deoarece răspunsul localizat în timp real nu este disponibil.",
+  });
+
 export const localizedBookingComposerNavigationLabel = (
   locale: unknown,
   variant: "unprefilled" | "prefilled",

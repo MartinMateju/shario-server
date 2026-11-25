@@ -16,6 +16,7 @@ import { getTenantBySlug } from "@/modules/tenants/services/tenant.service.js";
 import { TENANT_STATUS } from "@/modules/tenants/tenant.constants.js";
 import TenantMembershipModel from "@/modules/tenant-access/tenant-membership.model.js";
 import { resolveTenantCommerceOrigin } from "@/modules/checkout/checkout.urls.js";
+import type { TenantUrlContext } from "@/modules/checkout/checkout.urls.js";
 import type { AuthTenantForToken } from "@/modules/auth/auth.types.js";
 import UserModel from "@/modules/user/user.model.js";
 import { PLATFORM_ROLE, TENANT_ROLE } from "@/modules/user/user.constants.js";
@@ -70,13 +71,7 @@ export const resolveCustomerSocialReturnOrigin = ({
   tenant,
   requestedOrigin,
 }: {
-  tenant: {
-    slug: string;
-    domains?: Array<{
-      hostname?: string;
-      status?: string;
-    }>;
-  };
+  tenant: TenantUrlContext;
   requestedOrigin?: unknown;
 }): string => {
   const standard = resolveTenantCommerceOrigin({ tenant });
@@ -272,10 +267,38 @@ export const resolveCustomerIdentity = async ({
     }
   }
 
+  // Inspect the resolved account, including one recovered after a concurrent
+  // registration wins the unique-email index. That account may carry someone
+  // else's password even when the initial lookup found no user.
+  // Team accounts keep their password login when entering the customer portal.
+  const linksUnverifiedExistingAccount =
+    user.isEmailVerified !== true &&
+    String(user.tenantRole ?? TENANT_ROLE.CUSTOMER) === TENANT_ROLE.CUSTOMER;
+
+  // A provider proves the address it returned, not a replacement address that
+  // staff may save concurrently. Include the observed credential version in
+  // the document write so that race fails closed rather than verifying it.
+  const observedSessionVersion = Number(user.sessionVersion ?? 0);
+  user.$where = {
+    email,
+    ...(observedSessionVersion === 0
+      ? { $or: [{ sessionVersion: 0 }, { sessionVersion: { $exists: false } }] }
+      : { sessionVersion: observedSessionVersion }),
+  };
+
   // A verified provider may claim the explicit guest record created by
   // one-off course checkout, preserving its order and booking history. An
   // ordinary disabled/suspended customer is rejected above and never
   // reactivated implicitly.
+  if (linksUnverifiedExistingAccount) {
+    // The provider has now proven who owns this email. Whoever registered the
+    // unverified account must not keep a working password or session, or they
+    // could sign in to the real owner's account afterwards.
+    user.password = randomBytes(48).toString("base64url");
+    user.refreshToken = [];
+    user.sessionVersion = Number(user.sessionVersion ?? 0) + 1;
+  }
+
   user.isAccessGranted = true;
   user.isEmailVerified = true;
   await user.save();

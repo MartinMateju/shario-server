@@ -4,7 +4,7 @@ import {
 } from "@/shared/i18n/locales.js";
 import { isTenantDomainEntitled } from "@/modules/tenants/tenant-domain-entitlement.js";
 
-type TenantUrlContext = {
+export type TenantUrlContext = {
   slug: string;
   plan?: unknown;
   planVersion?: unknown;
@@ -12,6 +12,7 @@ type TenantUrlContext = {
     hostname?: string;
     status?: string;
     type?: string;
+    isPrimary?: boolean;
   }>;
 };
 
@@ -30,6 +31,17 @@ const normalizeHostname = (value: unknown): string =>
     .trim()
     .toLowerCase()
     .replace(/\.$/, "");
+
+export const isValidTenantCustomHostname = (hostname: string): boolean =>
+  hostname.length <= 253 &&
+  hostname.includes(".") &&
+  hostname !== "shario.io" &&
+  !hostname.endsWith(".shario.io") &&
+  !hostname.endsWith(".localhost") &&
+  !/^\d+(?:\.\d+){3}$/.test(hostname) &&
+  hostname
+    .split(".")
+    .every((label) => /^[a-z\d](?:[a-z\d-]{0,61}[a-z\d])?$/.test(label));
 
 const developmentRootDomain = (): string =>
   normalizeHostname(process.env.DEVELOPMENT_ROOT_DOMAIN || "localhost");
@@ -55,8 +67,32 @@ const activeCustomHostnames = (tenant: TenantUrlContext): Set<string> =>
           isTenantDomainEntitled({ tenant, domain }),
       )
       .map((domain) => normalizeHostname(domain.hostname))
-      .filter(Boolean),
+      .filter(isValidTenantCustomHostname),
   );
+
+/**
+ * Public links created without a browser request (emails, SEO, scheduled jobs)
+ * use the explicitly selected, active tenant domain. Never infer a primary
+ * host from array order or accept an unverified request header as a default.
+ */
+export const resolveTenantPublicOrigin = (tenant: TenantUrlContext): string => {
+  const primaryDomains = (tenant.domains ?? []).filter(
+    (domain) => domain.status === "active" && domain.isPrimary === true,
+  );
+  if (primaryDomains.length === 1) {
+    const primary = primaryDomains[0];
+    const hostname = normalizeHostname(primary.hostname);
+    if (
+      primary.type === "custom" &&
+      isValidTenantCustomHostname(hostname) &&
+      isTenantDomainEntitled({ tenant, domain: primary })
+    ) {
+      return `https://${hostname}`;
+    }
+  }
+
+  return standardTenantOrigin(tenant.slug);
+};
 
 /**
  * Returns a tenant-owned browser origin. Client supplied origins are accepted
@@ -71,14 +107,23 @@ export const resolveTenantCommerceOrigin = ({
   requestedOrigin?: unknown;
 }): string => {
   const standard = standardTenantOrigin(tenant.slug);
+  const publicOrigin = resolveTenantPublicOrigin(tenant);
   const customHosts = activeCustomHostnames(tenant);
 
   if (typeof requestedOrigin !== "string" || !requestedOrigin.trim()) {
-    return standard;
+    return publicOrigin;
   }
 
   try {
     const candidate = new URL(requestedOrigin);
+    if (
+      candidate.username ||
+      candidate.password ||
+      candidate.pathname !== "/" ||
+      candidate.search ||
+      candidate.hash
+    )
+      return publicOrigin;
     const standardUrl = new URL(standard);
     const hostname = normalizeHostname(candidate.hostname);
     const isStandard =
@@ -95,10 +140,10 @@ export const resolveTenantCommerceOrigin = ({
       return candidate.origin;
     }
   } catch {
-    // Fall through to the server-derived standard tenant origin.
+    // Fall through to the server-derived primary tenant origin.
   }
 
-  return standard;
+  return publicOrigin;
 };
 
 export const buildTenantCommerceUrl = ({

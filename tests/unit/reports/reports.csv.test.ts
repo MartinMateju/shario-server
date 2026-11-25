@@ -137,31 +137,26 @@ describe("report CSV safety", () => {
       },
     });
 
+    expect(csv).not.toContain("grossSalesMinor");
+    expect(csv).not.toContain("discountsMinor");
+    expect(csv).not.toContain("taxMinor");
+    expect(csv).not.toContain("refundsMinor");
+    expect(csv).not.toContain("noShows");
     expect(csv.startsWith("\uFEFF")).toBe(true);
     expect(csv.charAt(1)).not.toBe("\uFEFF");
     expect(csv).toContain("\r\n");
-    expect(csv).toContain(
-      '"metadata","locationScope","all_accessible"',
-    );
+    expect(csv).toContain('"metadata","locationScope","all_accessible"');
     expect(csv).toContain(`"'=permission_required"`);
     expect(csv).toContain('"bookings","","","","count"');
+    expect(csv).toContain('"sales.totalsByCurrency","CZK","10000","2"');
     expect(csv).toContain(
-      '"sales.totalsByCurrency","CZK","12000","1000","1000","10000","11000","2"',
+      '"sales.topProducts","product-1","\'=Clay","2","10000","CZK"',
     );
-    expect(csv).toContain(
-      '"sales.topProducts","product-1","\'=Clay","2","10000","12000","CZK"',
-    );
-    expect(csv).toContain(
-      '"bookings.heatmap","0","10","1","2","8","25"',
-    );
+    expect(csv).toContain('"bookings.heatmap","0","10","1","2","8","25"');
     expect(csv).toContain(
       '"operations.inventory.consumptionByUnit","kg","4.5"',
     );
-    expect(csv).toContain(
-      '"operations.staffTasks","overdue","1","count"',
-    );
-    expect(csv).toContain(
-      '"bookings.courseFill","status","unavailable"',
-    );
+    expect(csv).toContain('"operations.staffTasks","overdue","1","count"');
+    expect(csv).toContain('"bookings.courseFill","status","unavailable"');
   });
 });

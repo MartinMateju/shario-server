@@ -9,6 +9,7 @@ import {
   uploadBufferToR2,
 } from "@/infrastructure/storage/r2.client.js";
 import {
+  CUSTOMER_PORTAL_PAGE_IMAGE_SLOTS,
   PUBLIC_SITE_MEDIA_MAX_BYTES,
   PUBLIC_SITE_MEDIA_SLOT,
   type PublicSiteMediaSlot,
@@ -309,6 +310,12 @@ const patchForSlot = (
   slot: PublicSiteMediaSlot,
   url: string,
 ): UpdateTenantPublicSiteInput => {
+  if (Object.hasOwn(CUSTOMER_PORTAL_PAGE_IMAGE_SLOTS, slot)) {
+    const page = CUSTOMER_PORTAL_PAGE_IMAGE_SLOTS[
+      slot as keyof typeof CUSTOMER_PORTAL_PAGE_IMAGE_SLOTS
+    ];
+    return { customerPortal: { pageImages: { [page]: url } } };
+  }
   switch (slot) {
     case PUBLIC_SITE_MEDIA_SLOT.LOGO:
       return { branding: { logoUrl: url } };
@@ -323,6 +330,8 @@ const patchForSlot = (
       return { register: { backgroundImageUrl: url } };
     case PUBLIC_SITE_MEDIA_SLOT.COURSE_HERO:
       throw new Error("Course hero requires a location-specific patch.");
+    default:
+      throw new Error("Unknown public-site media slot.");
   }
 };
 

@@ -48,6 +48,12 @@ export const communicationEmailLogIdParamsSchema = z.object({
   id: objectIdSchema("email log id"),
 });
 
+export const retryCommunicationEmailLogSchema = z
+  .object({
+    expectedManualRetryCount: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER - 1),
+  })
+  .strict();
+
 export type ListCommunicationEmailLogsInput = z.infer<
   typeof listCommunicationEmailLogsSchema
 >;

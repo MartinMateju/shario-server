@@ -26,6 +26,7 @@ import {
   getBookingsByUserId,
   getBookingsHistory,
   getBookingsWithFilters,
+  getBookingFilterOptions,
   getUserBookings,
 } from "./controllers/booking.read.controller.js";
 
@@ -102,6 +103,7 @@ router
   .delete(cancelBookings, deleteBookingRequiresCancellation);
 
 router.get("/history", viewBookings, getBookingsHistory);
+router.get("/filter-options", viewBookings, getBookingFilterOptions);
 router.post("/filter", viewBookings, getBookingsWithFilters);
 router.patch("/user", viewBookings, getBookingsByUserId);
 router.get("/user-bookings", getUserBookings);

@@ -59,6 +59,21 @@ describe("order admin read service", () => {
     ).not.toHaveBeenCalled();
   });
 
+  it("annotates authorized historical orders without inventing a cart-based amount", async () => {
+    mocks.listOrdersWithFilters.mockResolvedValueOnce({
+      orders: [{ _id: ORDER_ID, currency: "CZK", isPaid: true, cart: { totalPrice: 1250 } }],
+      totalCount: 1, totalPages: 1, currentPage: 1, pageSize: 8,
+    });
+    const result = await getOrdersWithFilters({
+      tenantId: TENANT_ID, input: {}, allowedLocationIds: [LOCATION_A],
+    });
+    expect(result).toMatchObject({ totalCount: 1, orders: [{
+      _id: ORDER_ID, salesAmounts: {
+        status: "unavailable", reason: "missing_financial_snapshot", netAmountMinor: null,
+      },
+    }] });
+  });
+
   it("validates an explicit location filter before querying orders", async () => {
     await getOrdersWithFilters({
       tenantId: TENANT_ID,

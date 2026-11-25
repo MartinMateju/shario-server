@@ -79,6 +79,7 @@ const access = ({
   permissions = [WORKSPACE_PERMISSION.BOOKINGS_VIEW],
   locationIds = [] as string[],
   inApp = true,
+  bookingCreated = true,
   bookingAssigned = true,
 } = {}) => ({
   status: TENANT_MEMBERSHIP_STATUS.ACTIVE,
@@ -86,6 +87,7 @@ const access = ({
   locationAccess: { mode: "selected", locationIds },
   preferences: {
     notifications: {
+      bookingCreated,
       bookingAssigned,
       bookingCancelled: true,
       taskAssigned: true,
@@ -150,7 +152,7 @@ describe("workspace notification publisher", () => {
       [inAppDisabledId, access({ locationIds: [locationId], inApp: false })],
       [
         bookingDisabledId,
-        access({ locationIds: [locationId], bookingAssigned: false }),
+        access({ locationIds: [locationId], bookingCreated: false }),
       ],
       [
         permissionMissingId,
@@ -196,6 +198,32 @@ describe("workspace notification publisher", () => {
       ],
       { session: null },
     );
+  });
+
+  it.each([
+    { eventType: WORKSPACE_NOTIFICATION_EVENT.BOOKING_CREATED, bookingCreated: undefined, bookingAssigned: true, expected: 0 },
+    { eventType: WORKSPACE_NOTIFICATION_EVENT.BOOKING_CREATED, bookingCreated: false, bookingAssigned: true, expected: 0 },
+    { eventType: WORKSPACE_NOTIFICATION_EVENT.BOOKING_CREATED, bookingCreated: true, bookingAssigned: false, expected: 1 },
+    { eventType: WORKSPACE_NOTIFICATION_EVENT.BOOKING_RESCHEDULED, bookingCreated: false, bookingAssigned: true, expected: 1 },
+    { eventType: WORKSPACE_NOTIFICATION_EVENT.BOOKING_RESCHEDULED, bookingCreated: true, bookingAssigned: false, expected: 0 },
+  ])("keeps booking creation opt-in independent of rescheduling: $eventType / $bookingCreated / $bookingAssigned", async ({
+    eventType, bookingCreated, bookingAssigned, expected,
+  }) => {
+    const recipientUserId = id();
+    queryReturning([{ user: recipientUserId }]);
+    const resolved = access({ bookingAssigned });
+    if (bookingCreated === undefined) {
+      delete resolved.preferences.notifications.bookingCreated;
+    } else {
+      resolved.preferences.notifications.bookingCreated = bookingCreated;
+    }
+    mocks.resolveWorkspaceAccessForUser.mockResolvedValue(resolved);
+    mocks.upsertMany.mockResolvedValue({ createdCount: expected });
+
+    const result = await publishWorkspaceNotification(notificationInput({ eventType }));
+
+    expect(result.eligibleRecipientCount).toBe(expected);
+    expect(mocks.upsertMany.mock.calls[0][0]).toHaveLength(expected);
   });
 
   it("reports recipient-level deduplication without creating noise", async () => {

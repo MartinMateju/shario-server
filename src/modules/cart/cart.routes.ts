@@ -9,15 +9,10 @@ import { requirePermission } from "@/modules/tenant-access/tenant-access.middlew
 import { WORKSPACE_PERMISSION } from "@/modules/tenant-access/tenant-access.permissions.js";
 
 import {
-  addCartItem,
   checkCreditsForCart,
-  clearActiveCart,
-  convertActiveCart,
   getCart,
   getCartsWithFilters,
   getUserCart,
-  removeCartItem,
-  updateCartItem,
 } from "@/modules/cart/cart.controller.js";
 
 const router = express.Router();
@@ -25,23 +20,10 @@ const router = express.Router();
 router.use(verifyJWT);
 
 router.get("/", requireCustomerSession, getCart);
-router.post("/items", requireCustomerSession, addCartItem);
-router.patch(
-  "/:cartId/items/:itemId",
-  requireCustomerSession,
-  updateCartItem,
-);
-router.delete(
-  "/:cartId/items/:itemId",
-  requireCustomerSession,
-  removeCartItem,
-);
-router.post("/clear", requireCustomerSession, clearActiveCart);
-router.patch(
-  "/:cartId/convert",
-  requireCustomerSession,
-  convertActiveCart,
-);
+// The legacy customer cart mutation routes (add/update/remove item, clear,
+// convert) were removed: no client calls them, and they let a customer rewrite
+// the price snapshot of a paid order's cart, which booking-extension pricing
+// reads. Carts are written only by the checkout services.
 router.post(
   "/check-credits",
   requireCustomerSession,

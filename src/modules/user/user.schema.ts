@@ -463,6 +463,13 @@ userSchema.index(
   },
 );
 
+// Stable directory pages/export use the identity as a creation-time tie breaker.
+// Add-only: existing consumers keep their previous indexes.
+userSchema.index(
+  { tenant: 1, tenantRole: 1, createdAt: -1, _id: -1 },
+  { name: "tenant_customer_directory_order" },
+);
+
 userSchema.index(
   {
     tenant: 1,

@@ -29,8 +29,7 @@ type EmailService = {
 };
 
 const INVALID_RESET = {
-  message:
-    "The password reset details are invalid or expired.",
+  message: "The password reset details are invalid or expired.",
   code: "INVALID_PASSWORD_RESET",
 } as const;
 
@@ -41,12 +40,9 @@ const INVALID_RESET = {
 const DUMMY_OTP_HASH =
   "$2a$10$sentsYzVHRvj2zTTqa46IuV2RF5ApQZiXfGzw5Fcx5MF0T1zNf/e2";
 
-const rejectInvalidReset = (): never =>
-  unauthorized(INVALID_RESET);
+const rejectInvalidReset = (): never => unauthorized(INVALID_RESET);
 
-export const createPasswordResetService = (
-  emailService: EmailService,
-) => {
+export const createPasswordResetService = (emailService: EmailService) => {
   return {
     async requestReset(input: {
       tenantId: string;
@@ -54,15 +50,13 @@ export const createPasswordResetService = (
       locale?: "cs" | "en";
       studioName?: string;
     }): Promise<{ status: "PENDING" }> {
-      const userRepository =
-        createUserRepository({
-          tenantId: input.tenantId,
-        });
+      const userRepository = createUserRepository({
+        tenantId: input.tenantId,
+      });
 
-      const user =
-        await userRepository.findByEmail(
-          input.email,
-        );
+      const user = await userRepository.findByEmail(input.email, {
+        select: "_id email +sessionVersion",
+      });
 
       // Never reveal whether an account exists in this tenant.
       if (!user) {
@@ -72,24 +66,23 @@ export const createPasswordResetService = (
       }
 
       const otp = generateNumericOtp();
-      const otpHash = await bcrypt.hash(
-        otp,
-        PASSWORD_RESET_BCRYPT_ROUNDS,
-      );
-      const expiresAt = new Date(
-        Date.now() +
-          PASSWORD_RESET_OTP_TTL_MS,
-      );
+      const otpHash = await bcrypt.hash(otp, PASSWORD_RESET_BCRYPT_ROUNDS);
+      const expiresAt = new Date(Date.now() + PASSWORD_RESET_OTP_TTL_MS);
 
       await passwordResetRepository.invalidateActiveForUser(
         input.tenantId,
         String(user._id),
+        undefined,
+        // Keep proofs for a newer email/credential version intact if this
+        // request waited while an identity change or reset committed.
+        { email: user.email, sessionVersion: user.sessionVersion ?? 0 },
       );
 
       await passwordResetRepository.create({
         tenantId: input.tenantId,
         userId: String(user._id),
         email: user.email,
+        sessionVersion: user.sessionVersion ?? 0,
         otpHash,
         expiresAt,
       });
@@ -98,10 +91,7 @@ export const createPasswordResetService = (
         tenantId: input.tenantId,
         to: user.email,
         otp,
-        expiresInMinutes: Math.round(
-          PASSWORD_RESET_OTP_TTL_MS /
-            60_000,
-        ),
+        expiresInMinutes: Math.round(PASSWORD_RESET_OTP_TTL_MS / 60_000),
         locale: input.locale,
         studioName: input.studioName,
       });
@@ -119,82 +109,56 @@ export const createPasswordResetService = (
       status: "VERIFIED";
       resetToken: string;
     }> {
-      const reset =
-        await passwordResetRepository.findLatestPendingByEmail(
-          input.tenantId,
-          input.email,
-        );
+      const reset = await passwordResetRepository.findLatestPendingByEmail(
+        input.tenantId,
+        input.email,
+      );
 
       if (!reset) {
-        await bcrypt.compare(
-          input.otp,
-          DUMMY_OTP_HASH,
-        );
+        await bcrypt.compare(input.otp, DUMMY_OTP_HASH);
         rejectInvalidReset();
       }
 
       const now = new Date();
 
       if (
-        reset.expiresAt.getTime() <=
-          now.getTime() ||
-        reset.attempts >=
-          reset.maxAttempts
+        reset.expiresAt.getTime() <= now.getTime() ||
+        reset.attempts >= reset.maxAttempts
       ) {
-        await passwordResetRepository.expirePending(
-          {
-            tenantId: input.tenantId,
-            resetId: String(reset._id),
-          },
-        );
+        await passwordResetRepository.expirePending({
+          tenantId: input.tenantId,
+          resetId: String(reset._id),
+        });
         rejectInvalidReset();
       }
 
-      const isValid = await bcrypt.compare(
-        input.otp,
-        reset.otpHash,
-      );
+      const isValid = await bcrypt.compare(input.otp, reset.otpHash);
 
       if (!isValid) {
-        await passwordResetRepository.incrementAttemptsIfPending(
-          {
-            tenantId: input.tenantId,
-            resetId: String(
-              reset._id,
-            ),
-            now,
-          },
-        );
+        await passwordResetRepository.incrementAttemptsIfPending({
+          tenantId: input.tenantId,
+          resetId: String(reset._id),
+          now,
+        });
         rejectInvalidReset();
       }
 
-      const resetToken =
-        createOtpToken();
-      const resetTokenHash =
-        hashPasswordResetToken(
-          resetToken,
-        );
-      const resetTokenExpiresAt =
-        new Date(
-          Math.min(
-            reset.expiresAt.getTime(),
-            now.getTime() +
-              PASSWORD_RESET_TOKEN_TTL_MS,
-          ),
-        );
+      const resetToken = createOtpToken();
+      const resetTokenHash = hashPasswordResetToken(resetToken);
+      const resetTokenExpiresAt = new Date(
+        Math.min(
+          reset.expiresAt.getTime(),
+          now.getTime() + PASSWORD_RESET_TOKEN_TTL_MS,
+        ),
+      );
 
-      const verified =
-        await passwordResetRepository.verifyPending(
-          {
-            tenantId: input.tenantId,
-            resetId: String(
-              reset._id,
-            ),
-            resetTokenHash,
-            resetTokenExpiresAt,
-            now,
-          },
-        );
+      const verified = await passwordResetRepository.verifyPending({
+        tenantId: input.tenantId,
+        resetId: String(reset._id),
+        resetTokenHash,
+        resetTokenExpiresAt,
+        now,
+      });
 
       /*
        * The conditional transition ensures that two concurrent OTP
@@ -217,72 +181,72 @@ export const createPasswordResetService = (
     }): Promise<{
       status: "SUCCESS";
     }> {
-      const resetTokenHash =
-        hashPasswordResetToken(
-          input.resetToken,
-        );
-      const hashedPassword =
-        await bcrypt.hash(
-          input.password,
-          PASSWORD_RESET_BCRYPT_ROUNDS,
-        );
-      const session =
-        await mongoose.startSession();
+      const resetTokenHash = hashPasswordResetToken(input.resetToken);
+      const hashedPassword = await bcrypt.hash(
+        input.password,
+        PASSWORD_RESET_BCRYPT_ROUNDS,
+      );
+      const session = await mongoose.startSession();
 
       try {
-        await session.withTransaction(
-          async () => {
-            const reset =
-              await passwordResetRepository.consumeVerified(
-                {
-                  tenantId:
-                    input.tenantId,
-                  resetTokenHash,
-                  now: new Date(),
-                  session,
-                },
-              );
+        await session.withTransaction(async () => {
+          const reset = await passwordResetRepository.consumeVerified({
+            tenantId: input.tenantId,
+            resetTokenHash,
+            now: new Date(),
+            session,
+          });
 
-            if (!reset) {
-              rejectInvalidReset();
-            }
+          if (!reset) {
+            rejectInvalidReset();
+          }
 
-            const result =
-              await UserModel.updateOne(
-                {
-                  _id: reset.user,
-                  tenant:
-                    input.tenantId,
-                },
-                {
-                  $set: {
-                    password:
-                      hashedPassword,
-                    // A password reset revokes every browser session.
-                    refreshToken: [],
-                  },
-                  $inc: {
-                    sessionVersion: 1,
-                  },
-                },
-              )
-                .session(session)
-                .exec();
+          if (
+            !reset.email ||
+            !Number.isSafeInteger(reset.sessionVersion) ||
+            reset.sessionVersion < 0
+          ) {
+            rejectInvalidReset();
+          }
 
-            if (
-              result.matchedCount !==
-              1
-            ) {
-              rejectInvalidReset();
-            }
+          const result = await UserModel.updateOne(
+            {
+              _id: reset.user,
+              tenant: input.tenantId,
+              email: reset.email,
+              ...(reset.sessionVersion === 0
+                ? {
+                    $or: [
+                      { sessionVersion: 0 },
+                      { sessionVersion: { $exists: false } },
+                    ],
+                  }
+                : { sessionVersion: reset.sessionVersion }),
+            },
+            {
+              $set: {
+                password: hashedPassword,
+                // A password reset revokes every browser session.
+                refreshToken: [],
+              },
+              $inc: {
+                sessionVersion: 1,
+              },
+            },
+          )
+            .session(session)
+            .exec();
 
-            await passwordResetRepository.invalidateActiveForUser(
-              input.tenantId,
-              String(reset.user),
-              session,
-            );
-          },
-        );
+          if (result.matchedCount !== 1) {
+            rejectInvalidReset();
+          }
+
+          await passwordResetRepository.invalidateActiveForUser(
+            input.tenantId,
+            String(reset.user),
+            session,
+          );
+        });
       } finally {
         await session.endSession();
       }

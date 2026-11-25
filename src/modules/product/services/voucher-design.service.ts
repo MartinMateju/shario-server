@@ -78,6 +78,31 @@ export const assertVoucherAssetOwnership = (
   }
 };
 
+/** Expose only a saved catalog image or the validated, public design photograph. */
+export const resolvePublicVoucherImageSrc = ({
+  tenantId,
+  imageSrc,
+  voucherDesign,
+}: {
+  tenantId: string;
+  imageSrc?: string | null;
+  voucherDesign?: unknown;
+}): string => {
+  const catalogImage = imageSrc?.trim();
+  if (catalogImage) return catalogImage;
+
+  const parsed = voucherDesignSchema.safeParse(voucherDesign);
+  if (!parsed.success || !parsed.data.assets.imageKey) return "";
+  const key = parsed.data.assets.imageKey;
+  try {
+    assertVoucherAssetOwnership(tenantId, key);
+  } catch {
+    // Legacy or malformed designs must not reveal another workspace's assets.
+    return "";
+  }
+  return getR2PublicUrl(key);
+};
+
 const validateImageDimensions = (width: number, height: number): void => {
   if (
     !Number.isSafeInteger(width) ||

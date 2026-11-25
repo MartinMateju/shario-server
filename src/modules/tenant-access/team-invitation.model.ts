@@ -21,6 +21,9 @@ const schema = new Schema(
       ref: "TenantMembership",
       default: null,
     },
+    // A re-invitation may restore only the revoked membership version that
+    // the sender reviewed, never access changed after the invitation was sent.
+    membershipAccessVersion: { type: Number, min: 1, default: null },
     roleKey: {
       type: String,
       enum: Object.values(WORKSPACE_ROLE),

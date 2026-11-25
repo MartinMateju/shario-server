@@ -132,14 +132,10 @@ describe("Knowledge Hub text index startup repair", () => {
       LEGACY_KNOWLEDGE_TEXT_INDEX_NAME,
     ]);
     const indexesBefore = await articles.listIndexes().toArray();
-    const createIndex = vi.fn<typeof articles.createIndex>(articles.createIndex.bind(articles));
-    const dropIndex = vi.fn<typeof articles.dropIndex>(articles.dropIndex.bind(articles));
+    const createIndex = vi.spyOn(articles, "createIndex");
+    const dropIndex = vi.spyOn(articles, "dropIndex");
     await expect(
-      ensureKnowledgeTextIndex({
-        listIndexes: articles.listIndexes.bind(articles),
-        createIndex,
-        dropIndex,
-      }),
+      ensureKnowledgeTextIndex(articles),
     ).resolves.toEqual({ removedLegacyIndexes: [] });
     expect(createIndex).not.toHaveBeenCalled();
     expect(dropIndex).not.toHaveBeenCalled();

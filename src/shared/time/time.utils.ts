@@ -95,13 +95,17 @@ export const buildUTCDateFromLocalDateAndTime = ({
     return null;
   }
 
-  return parsedDate
-    .hour(parsedTime.hour)
-    .minute(parsedTime.minute)
-    .second(0)
-    .millisecond(0)
-    .utc()
-    .toDate();
+  // Parse the full wall-clock time on the target date. Setting the hour on
+  // local midnight would keep midnight's UTC offset and store the result one
+  // hour off on days when daylight-saving time changes.
+  const pad = (value: number) => String(value).padStart(2, "0");
+  const zoned = dayjs.tz(
+    `${parsedDate.format(DATE_FORMAT)} ${pad(parsedTime.hour)}:${pad(parsedTime.minute)}`,
+    `${DATE_FORMAT} HH:mm`,
+    timezone,
+  );
+
+  return zoned.isValid() ? zoned.utc().toDate() : null;
 };
 
 export const buildUTCBookingRangeFromLocalInputs = ({
@@ -126,9 +130,21 @@ export const buildUTCBookingRangeFromLocalInputs = ({
     return null;
   }
 
-  // Allows ranges crossing midnight, e.g. 23:00 -> 01:00.
+  // Allows ranges crossing midnight, e.g. 23:00 -> 01:00. The end is the same
+  // wall-clock time on the next local calendar date, which is not always 24
+  // elapsed hours later.
   if (end.getTime() <= start.getTime()) {
-    end = dayjs(end).add(1, "day").toDate();
+    const nextDate = parseDateStringInTimezone(date, timezone)
+      ?.add(1, "day")
+      .format(DATE_FORMAT);
+    end = nextDate
+      ? buildUTCDateFromLocalDateAndTime({
+          date: nextDate,
+          time: endTime,
+          timezone,
+        })
+      : null;
+    if (!end) return null;
   }
 
   return {

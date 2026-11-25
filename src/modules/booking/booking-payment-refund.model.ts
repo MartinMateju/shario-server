@@ -83,6 +83,9 @@ const schema = new mongoose.Schema(
     providerStatus: { type: String, default: "" },
     failureEventId: { type: String, default: "", maxlength: 255 },
     failureRecordedAt: { type: Date, default: null },
+    // Cancellation checks lock settled allocations against concurrent worker
+    // or failure-webhook changes inside the booking transaction.
+    allocationCheckRevision: { type: Number, default: 0 },
     claimToken: { type: String, default: "" },
     claimExpiresAt: { type: Date, default: null },
     attempts: { type: Number, default: 0 },
@@ -100,6 +103,10 @@ schema.index(
 schema.index(
   { tenant: 1, order: 1, booking: 1 },
   { name: "booking_payment_refund_order" },
+);
+schema.index(
+  { tenant: 1, connectedAccountId: 1, refundId: 1 },
+  { name: "booking_payment_refund_provider_lookup" },
 );
 
 export const BookingPaymentRefund: mongoose.Model<any> =

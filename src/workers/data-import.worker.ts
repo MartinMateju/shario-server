@@ -11,6 +11,7 @@ import connectDB, {
 } from "@/infrastructure/database/connect-db.js";
 import { createGracefulShutdown } from "@/infrastructure/lifecycle/graceful-shutdown.js";
 import { startWorkerOperationalTelemetry } from "@/infrastructure/queues/worker-operational-telemetry.js";
+import { publishWorkerHeartbeat } from "@/infrastructure/operations/worker-heartbeats.js";
 import {
   dataImportQueue,
   dataImportQueueName,
@@ -120,7 +121,10 @@ export const startDataImportWorker = async () => {
     role: "data-import",
     queueName: dataImportQueueName,
     queue: dataImportQueue,
-    emit: (sample) => logger.info(sample, "Worker operational sample."),
+    emit: (sample) => {
+      logger.info(sample, "Worker operational sample.");
+      publishWorkerHeartbeat(sample);
+    },
   });
   worker.on("completed", (job) => {
     telemetry.recordCompleted();

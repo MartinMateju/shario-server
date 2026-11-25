@@ -49,6 +49,7 @@ export type WorkspaceProfile = {
 };
 
 export type WorkspaceNotificationPreferences = {
+  bookingCreated: boolean;
   bookingAssigned: boolean;
   bookingCancelled: boolean;
   taskAssigned: boolean;
@@ -65,6 +66,8 @@ export type WorkspacePreferences = {
   weekStartsOn: 0 | 1;
   defaultLandingPage: string;
   overviewLaunchCenterDismissed?: boolean;
+  emailReadyBannerDismissed?: boolean;
+  overviewAttentionDismissed?: boolean;
   productTour?: {
     version: number;
     status: ProductTourStatus | null;

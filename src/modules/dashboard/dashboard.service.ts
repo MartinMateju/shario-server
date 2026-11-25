@@ -62,6 +62,7 @@ type ScheduleSource = {
     capacity: number | null;
     status: string;
   }>;
+  nextBooking: ScheduleSource["items"][number] | null;
   booked: number;
   unpaidBookings: number;
   expectedVisitors: number;
@@ -109,6 +110,7 @@ const localizedText = (value: unknown, fallback = ""): string => {
 
 const participantCount = (booking: any): number => {
   const participants = activeBookingParticipants(booking).length;
+  if (booking.attendanceManaged === true) return participants;
   const guests = nonNegativeNumber(booking?.numberOfGuests);
 
   if ((CLASS_BOOKING_TAGS as readonly string[]).includes(booking?.tag)) {
@@ -136,9 +138,15 @@ const bookingParticipantCountExpression = {
     },
     in: {
       $cond: [
-        { $in: ["$tag", CLASS_BOOKING_TAGS] },
-        { $max: ["$$participants", "$$guests"] },
-        { $max: ["$$participants", "$$guests", 1] },
+        { $eq: ["$attendanceManaged", true] },
+        "$$participants",
+        {
+          $cond: [
+            { $in: ["$tag", CLASS_BOOKING_TAGS] },
+            { $max: ["$$participants", "$$guests"] },
+            { $max: ["$$participants", "$$guests", 1] },
+          ],
+        },
       ],
     },
   },
@@ -269,26 +277,39 @@ const loadScheduleSource = async ({
     tag: { $ne: BOOKING_TAG.GUEST_INCREASE },
   };
 
-  const scheduleQuery = Booking.find(confirmed)
-    .sort({ start: 1, _id: 1 })
-    .limit(SCHEDULE_LIMIT)
-    .select(
-      "_id start end bookingProduct location participants numberOfGuests tag status",
-    )
-    .populate({
-      path: "bookingProduct",
-      select: "name type maxNumberOfParticipants",
-      match: { tenant: context.tenantId },
-    })
-    .populate({
-      path: "location",
-      select: "name booking.globalCapacity",
-      match: { tenant: context.tenantId },
-    })
-    .lean();
+  const scheduleQuery = (filter: Record<string, unknown>, limit: number) =>
+    Booking.find(filter)
+      .sort({ start: 1, _id: 1 })
+      .limit(limit)
+      .select(
+        "_id start end bookingProduct location participants attendanceManaged numberOfGuests tag status",
+      )
+      .populate({
+        path: "bookingProduct",
+        select: "name type maxNumberOfParticipants",
+        match: { tenant: context.tenantId },
+      })
+      .populate({
+        path: "location",
+        select: "name booking.globalCapacity",
+        match: { tenant: context.tenantId },
+      })
+      .lean();
 
-  const [bookings, dailyRows, liveRows] = await Promise.all([
-    scheduleQuery,
+  const [bookings, nextBookings, dailyRows, liveRows] = await Promise.all([
+    scheduleQuery(confirmed, SCHEDULE_LIMIT),
+    // The day's preview is bounded. Find the next start independently so an
+    // ongoing booking or twelve earlier rows cannot hide the next arrival.
+    scheduleQuery(
+      {
+        ...confirmed,
+        start: {
+          $gte: new Date(Math.max(period.start.valueOf(), now.valueOf())),
+          $lt: period.endExclusive,
+        },
+      },
+      1,
+    ),
     Booking.aggregate([
       { $match: dailyMatch },
       {
@@ -339,37 +360,40 @@ const loadScheduleSource = async ({
   const dailyTotals = (dailyRows as any[])[0] ?? {};
   const liveTotals = (liveRows as any[])[0] ?? {};
 
-  return {
-    items: (bookings as any[]).map((booking) => {
-      const product =
-        booking.bookingProduct && typeof booking.bookingProduct === "object"
-          ? booking.bookingProduct
-          : null;
-      const location =
-        booking.location && typeof booking.location === "object"
-          ? booking.location
-          : null;
-      const productCapacity = finiteNumber(product?.maxNumberOfParticipants);
-      const locationCapacity = finiteNumber(location?.booking?.globalCapacity);
+  const serializeBooking = (booking: any): ScheduleSource["items"][number] => {
+    const product =
+      booking.bookingProduct && typeof booking.bookingProduct === "object"
+        ? booking.bookingProduct
+        : null;
+    const location =
+      booking.location && typeof booking.location === "object"
+        ? booking.location
+        : null;
+    const productCapacity = finiteNumber(product?.maxNumberOfParticipants);
+    const locationCapacity = finiteNumber(location?.booking?.globalCapacity);
 
-      return {
-        id: entityId(booking._id),
-        title: localizedText(product?.name, String(booking.tag || "booking")),
-        productType: product?.type ? String(product.type) : null,
-        start: asIso(booking.start),
-        end: asIso(booking.end),
-        locationId: entityId(booking.location),
-        locationName: String(location?.name || ""),
-        participantCount: participantCount(booking),
-        capacity:
-          productCapacity && productCapacity > 0
-            ? productCapacity
-            : locationCapacity && locationCapacity > 0
-              ? locationCapacity
-              : null,
-        status: String(booking.status || ""),
-      };
-    }),
+    return {
+      id: entityId(booking._id),
+      title: localizedText(product?.name, String(booking.tag || "booking")),
+      productType: product?.type ? String(product.type) : null,
+      start: asIso(booking.start),
+      end: asIso(booking.end),
+      locationId: entityId(booking.location),
+      locationName: String(location?.name || ""),
+      participantCount: participantCount(booking),
+      capacity:
+        productCapacity && productCapacity > 0
+          ? productCapacity
+          : locationCapacity && locationCapacity > 0
+            ? locationCapacity
+            : null,
+      status: String(booking.status || ""),
+    };
+  };
+
+  return {
+    items: (bookings as any[]).map(serializeBooking),
+    nextBooking: nextBookings[0] ? serializeBooking(nextBookings[0]) : null,
     booked: nonNegativeNumber(dailyTotals.booked),
     unpaidBookings: nonNegativeNumber(dailyTotals.unpaidBookings),
     expectedVisitors: nonNegativeNumber(dailyTotals.expectedVisitors),
@@ -808,6 +832,7 @@ export const buildDashboardOverview = async ({
     today: {
       available: schedule !== null,
       schedule: schedule?.items ?? null,
+      nextBooking: schedule?.nextBooking ?? null,
     },
     milestones: {
       firstCustomerBooking: {

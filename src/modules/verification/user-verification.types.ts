@@ -19,9 +19,13 @@ export type VerificationTenant = {
   id?: IdLike;
   name?: string;
   slug: string;
+  plan?: unknown;
+  planVersion?: unknown;
   domains?: Array<{
     hostname?: string;
     status?: string;
+    type?: string;
+    isPrimary?: boolean;
   }>;
   settings?: {
     defaultLanguage?: string;

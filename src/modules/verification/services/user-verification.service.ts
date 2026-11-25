@@ -28,81 +28,45 @@ import {
   normalizeVerificationLocale,
 } from "../user-verification.utils.js";
 
-const toObjectId = (
-  value: unknown,
-): mongoose.Types.ObjectId =>
-  new mongoose.Types.ObjectId(
-    String(value),
-  );
+const toObjectId = (value: unknown): mongoose.Types.ObjectId =>
+  new mongoose.Types.ObjectId(String(value));
 
-const getTenantId = (
-  tenant: VerificationTenant,
-): string =>
+const getTenantId = (tenant: VerificationTenant): string =>
+  String(tenant._id ?? tenant.id ?? "").trim();
+
+const getStudioName = (tenant: VerificationTenant): string =>
   String(
-    tenant._id ??
-      tenant.id ??
-      "",
+    tenant.publicSite?.branding?.displayName || tenant.name || "Studio",
   ).trim();
 
-const getStudioName = (
-  tenant: VerificationTenant,
-): string =>
-  String(
-    tenant.publicSite?.branding
-      ?.displayName ||
-      tenant.name ||
-      "Studio",
-  ).trim();
-
-const rejectInvalidVerification =
-  (): never =>
-    unauthorized({
-      message:
-        "The email verification link is invalid or expired.",
-      code:
-        "INVALID_EMAIL_VERIFICATION",
-    });
+const rejectInvalidVerification = (): never =>
+  unauthorized({
+    message: "The email verification link is invalid or expired.",
+    code: "INVALID_EMAIL_VERIFICATION",
+  });
 
 export const verificationService = {
-  async sendVerificationEmail(
-    input: SendVerificationEmailInput,
-  ) {
-    const tenantId = getTenantId(
-      input.tenant,
-    );
-    const normalizedEmail =
-      input.email
-        .trim()
-        .toLowerCase();
+  async sendVerificationEmail(input: SendVerificationEmailInput) {
+    const tenantId = getTenantId(input.tenant);
+    const normalizedEmail = input.email.trim().toLowerCase();
 
     if (!tenantId) {
-      throw new Error(
-        "Tenant ID is required to send a verification email.",
-      );
+      throw new Error("Tenant ID is required to send a verification email.");
     }
 
-    const user =
-      await UserModel.findOne({
-        _id: toObjectId(
-          input.userId,
-        ),
-        tenant:
-          toObjectId(tenantId),
-        email: normalizedEmail,
-      })
-        .select(
-          "_id email isEmailVerified",
-        )
-        .exec();
+    const user = await UserModel.findOne({
+      _id: toObjectId(input.userId),
+      tenant: toObjectId(tenantId),
+      email: normalizedEmail,
+    })
+      .select("_id email isEmailVerified +sessionVersion")
+      .exec();
 
     /*
      * Callers return a generic response. A missing or already verified user
      * never causes a different public response and receives no new token.
      */
-    if (
-      !user ||
-      user.isEmailVerified === true
-    ) {
+    if (!user || user.isEmailVerified === true) {
       return {
         sent: false,
       };
@@ -111,73 +75,72 @@ export const verificationService = {
     await verificationRepository.deletePendingEmailTokens(
       tenantId,
       input.userId,
+      undefined,
+      // A delayed request for an earlier identity cannot expire links issued
+      // after an address change. Credential changes still revoke all versions.
+      { email: normalizedEmail, sessionVersion: user.sessionVersion ?? 0 },
     );
 
-    const token =
-      createVerificationToken();
-    const hashedToken =
-      await hashVerificationToken(
-        token,
-      );
-    const expiresAt =
-      addMilliseconds(
-        new Date(),
-        EMAIL_VERIFICATION_EXPIRES_IN_MS,
-      );
+    const token = createVerificationToken();
+    const hashedToken = await hashVerificationToken(token);
+    const expiresAt = addMilliseconds(
+      new Date(),
+      EMAIL_VERIFICATION_EXPIRES_IN_MS,
+    );
 
-    await verificationRepository.createEmailToken(
-      {
+    try {
+      await verificationRepository.createEmailToken({
         tenantId,
         userId: input.userId,
         hashedToken,
         expiresAt,
-      },
-    );
+        email: normalizedEmail,
+        sessionVersion: user.sessionVersion ?? 0,
+      });
+    } catch (error) {
+      // The unique pending-token slot may now belong to a newer request or
+      // credential identity. Preserve that link rather than invalidating it
+      // to make this stale issuance win.
+      if (
+        error &&
+        typeof error === "object" &&
+        "code" in error &&
+        error.code === 11000
+      )
+        return { sent: false };
+      throw error;
+    }
 
-    const origin =
-      resolveTenantCommerceOrigin({
-        tenant: input.tenant,
-        requestedOrigin:
-          input.requestedOrigin,
-      });
-    const routeLocale =
-      normalizeVerificationLocale(
-        input.locale ??
-          input.tenant.settings
-            ?.publicDefaultLanguage ??
-          input.tenant.settings
-            ?.defaultLanguage,
-      );
-    const verificationUrl =
-      buildEmailVerificationUrl({
-        baseUrl: origin,
-        token,
-        locale: routeLocale,
-        next: input.next,
-      });
+    const origin = resolveTenantCommerceOrigin({
+      tenant: input.tenant,
+      requestedOrigin: input.requestedOrigin,
+    });
+    const routeLocale = normalizeVerificationLocale(
+      input.locale ??
+        input.tenant.settings?.publicDefaultLanguage ??
+        input.tenant.settings?.defaultLanguage,
+    );
+    const verificationUrl = buildEmailVerificationUrl({
+      baseUrl: origin,
+      token,
+      locale: routeLocale,
+      next: input.next,
+    });
 
     await sendEmail({
       tenantId,
       ...buildVerificationEmail({
         email: user.email,
         verificationUrl,
-        studioName:
-          getStudioName(
-            input.tenant,
-          ),
-        locale:
-          resolveCommunicationContentLocale(
-            routeLocale,
-          ),
+        studioName: getStudioName(input.tenant),
+        locale: resolveCommunicationContentLocale(routeLocale),
       }),
     });
 
     logger.info(
       {
         tenantId,
-        userId: String(
-          input.userId,
-        ),
+        userId: String(input.userId),
       },
       "Verification email sent.",
     );
@@ -195,12 +158,8 @@ export const verificationService = {
     next?: string;
     locale?: RolloutEligibleAppLocale;
   }) {
-    const tenantId = getTenantId(
-      input.tenant,
-    );
-    const email = input.email
-      .trim()
-      .toLowerCase();
+    const tenantId = getTenantId(input.tenant);
+    const email = input.email.trim().toLowerCase();
 
     if (!tenantId) {
       return {
@@ -208,104 +167,91 @@ export const verificationService = {
       };
     }
 
-    const user =
-      await UserModel.findOne({
-        tenant:
-          toObjectId(tenantId),
-        email,
-      })
-        .select(
-          "_id email isEmailVerified",
-        )
-        .exec();
+    const user = await UserModel.findOne({
+      tenant: toObjectId(tenantId),
+      email,
+    })
+      .select("_id email isEmailVerified")
+      .exec();
 
-    if (
-      !user ||
-      user.isEmailVerified === true
-    ) {
+    if (!user || user.isEmailVerified === true) {
       return {
         sent: false,
       };
     }
 
-    return this.sendVerificationEmail(
-      {
-        tenant: input.tenant,
-        userId: user._id,
-        email: user.email,
-        requestedOrigin:
-          input.requestedOrigin,
-        next: input.next,
-        locale: input.locale,
-      },
-    );
+    return this.sendVerificationEmail({
+      tenant: input.tenant,
+      userId: user._id,
+      email: user.email,
+      requestedOrigin: input.requestedOrigin,
+      next: input.next,
+      locale: input.locale,
+    });
   },
 
-  async verifyEmail(
-    input: VerifyEmailInput,
-  ) {
-    const hashedToken =
-      await hashVerificationToken(
-        input.token,
-      );
-    const session =
-      await mongoose.startSession();
+  async verifyEmail(input: VerifyEmailInput) {
+    const hashedToken = await hashVerificationToken(input.token);
+    const session = await mongoose.startSession();
     let verifiedUserId = "";
 
     try {
-      await session.withTransaction(
-        async () => {
-          const tokenRecord =
-            await verificationRepository.consumePendingEmailToken(
-              {
-                tenantId:
-                  input.tenantId,
-                hashedToken,
-                now: new Date(),
-                session,
-              },
-            );
+      await session.withTransaction(async () => {
+        const tokenRecord =
+          await verificationRepository.consumePendingEmailToken({
+            tenantId: input.tenantId,
+            hashedToken,
+            now: new Date(),
+            session,
+          });
 
-          /*
-           * A wrong hash leaves the legitimate pending record untouched.
-           * This prevents an attacker from invalidating somebody else's link.
-           */
-          if (!tokenRecord) {
-            rejectInvalidVerification();
-          }
+        /*
+         * A wrong hash leaves the legitimate pending record untouched.
+         * This prevents an attacker from invalidating somebody else's link.
+         */
+        if (!tokenRecord) {
+          rejectInvalidVerification();
+        }
 
-          const result =
-            await UserModel.updateOne(
-              {
-                _id:
-                  tokenRecord.user,
-                tenant:
-                  toObjectId(
-                    input.tenantId,
-                  ),
-              },
-              {
-                $set: {
-                  isEmailVerified: true,
-                },
-              },
-            )
-              .session(session)
-              .exec();
+        // Old unbound links must be resent. Missing identity information is
+        // not proof that the holder owns the customer's current address.
+        if (
+          !tokenRecord.email ||
+          !Number.isSafeInteger(tokenRecord.sessionVersion) ||
+          tokenRecord.sessionVersion < 0
+        ) {
+          rejectInvalidVerification();
+        }
 
-          if (
-            result.matchedCount !==
-            1
-          ) {
-            rejectInvalidVerification();
-          }
+        const result = await UserModel.updateOne(
+          {
+            _id: tokenRecord.user,
+            tenant: toObjectId(input.tenantId),
+            email: tokenRecord.email,
+            ...(tokenRecord.sessionVersion === 0
+              ? {
+                  $or: [
+                    { sessionVersion: 0 },
+                    { sessionVersion: { $exists: false } },
+                  ],
+                }
+              : { sessionVersion: tokenRecord.sessionVersion }),
+          },
+          {
+            $set: {
+              isEmailVerified: true,
+            },
+          },
+        )
+          .session(session)
+          .exec();
 
-          verifiedUserId =
-            String(
-              tokenRecord.user,
-            );
-        },
-      );
+        if (result.matchedCount !== 1) {
+          rejectInvalidVerification();
+        }
+
+        verifiedUserId = String(tokenRecord.user);
+      });
     } finally {
       await session.endSession();
     }
@@ -316,12 +262,8 @@ export const verificationService = {
     };
   },
 
-  async resendVerificationEmail(
-    input: SendVerificationEmailInput,
-  ) {
-    return this.sendVerificationEmail(
-      input,
-    );
+  async resendVerificationEmail(input: SendVerificationEmailInput) {
+    return this.sendVerificationEmail(input);
   },
 
   async sendRegistrationConfirmationEmail(
@@ -329,19 +271,17 @@ export const verificationService = {
   ) {
     await sendEmail({
       tenantId: input.tenantId,
-      ...buildRegistrationConfirmationEmail(
-        input,
-      ),
+      ...buildRegistrationConfirmationEmail(input),
     });
 
     return {
       email: input.email,
       customId: input.customId,
       memberNumber:
-        Number.isSafeInteger(input.memberNumber) && Number(input.memberNumber) > 0
+        Number.isSafeInteger(input.memberNumber) &&
+        Number(input.memberNumber) > 0
           ? input.memberNumber
           : null,
     };
   },
 };
-

@@ -10,10 +10,13 @@ import {
   exportReportCsv,
   getReportOverview,
 } from "./reports.controller.js";
+import { getReportCustomers, exportReportCustomersCsv } from "./reports.customer-controller.js";
 
 export const reportsRouter = Router();
 
 reportsRouter.use(requireWorkspaceAccess);
+reportsRouter.get("/customers", requirePermission(WORKSPACE_PERMISSION.REPORTS_VIEW), requirePermission(WORKSPACE_PERMISSION.CUSTOMERS_VIEW), getReportCustomers);
+reportsRouter.get("/customers/export.csv", requirePermission(WORKSPACE_PERMISSION.REPORTS_VIEW), requirePermission(WORKSPACE_PERMISSION.CUSTOMERS_VIEW), requirePermission(WORKSPACE_PERMISSION.REPORTS_EXPORT), exportReportCustomersCsv);
 reportsRouter.get(
   "/overview",
   requirePermission(WORKSPACE_PERMISSION.REPORTS_VIEW),

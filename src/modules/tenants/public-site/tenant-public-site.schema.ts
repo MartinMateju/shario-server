@@ -4,10 +4,11 @@ import { portalAppearanceSchema } from "@/shared/appearance/portal-appearance.sc
 import { ROLLOUT_ELIGIBLE_APP_LOCALES } from "@/shared/i18n/locales.js";
 
 import type { TenantPublicSite } from "../tenant.types.js";
-import { isSafePublicSiteUrl } from "./tenant-public-site.validators.js";
+import { isSafePublicSiteUrl, publicSiteCustomLinksSchema, publicSiteHeaderLinksSchema } from "./tenant-public-site.validators.js";
 import {
   CUSTOMER_PORTAL_NAVIGATION_KEYS,
   CUSTOMER_PORTAL_PAGE_IDS,
+  CUSTOMER_PORTAL_PAGE_IMAGE_KEYS,
   DEFAULT_PUBLIC_SITE_ACCENT_COLOR,
   DEFAULT_PUBLIC_SITE_BACKGROUND_COLOR,
   DEFAULT_PUBLIC_SITE_FONT_PRESET,
@@ -229,8 +230,67 @@ const publicSiteRegisterSchema = new Schema(
   { _id: false },
 );
 
+const customLinkLocalizedSchema = (maxLength: number) => new Schema(
+  Object.fromEntries(ROLLOUT_ELIGIBLE_APP_LOCALES.map((locale) => [locale, {
+    type: String, default: "", maxlength: maxLength,
+  }])),
+  { _id: false },
+);
+
+const publicSiteCustomLinkSchema = new Schema({
+  id: { type: String, required: true, match: /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/ },
+  label: { type: customLinkLocalizedSchema(80), default: () => ({}) },
+  href: { type: customLinkLocalizedSchema(PUBLIC_SITE_LIMITS.URL), default: () => ({}) },
+}, { _id: false });
+
+const customLinksField = (limit: number) => ({
+  type: [publicSiteCustomLinkSchema],
+  default: () => [],
+  validate: {
+    validator: (values: Array<{ toObject?: () => unknown }>) =>
+      publicSiteCustomLinksSchema(limit).safeParse(
+        values.map((value) => value.toObject?.() ?? value),
+      ).success,
+    message: "Custom links require unique identifiers, complete translated text and safe destinations.",
+  },
+});
+
+const publicSiteHeaderChildLinkSchema = publicSiteCustomLinkSchema.clone();
+publicSiteHeaderChildLinkSchema.add({ separatorBefore: { type: Boolean, default: false } });
+publicSiteHeaderChildLinkSchema.set("strict", "throw");
+
+const publicSiteHeaderLinkSchema = new Schema({
+  id: { type: String, required: true, match: /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/ },
+  label: { type: customLinkLocalizedSchema(80), default: () => ({}) },
+  href: { type: customLinkLocalizedSchema(PUBLIC_SITE_LIMITS.URL), default: undefined },
+  emphasis: { type: String, enum: ["button"], default: undefined },
+  children: { type: [publicSiteHeaderChildLinkSchema], default: undefined },
+}, { _id: false, strict: "throw" });
+
+const headerColorField = () => ({
+  type: String,
+  trim: true,
+  uppercase: true,
+  default: "",
+  match: /^(?:|#[0-9A-F]{6})$/,
+});
+
 const publicSiteHeaderSchema = new Schema(
   {
+    layout: { type: String, enum: ["default", "website"], default: "default" },
+    backgroundColor: headerColorField(),
+    linkColor: headerColorField(),
+    buttonColor: headerColorField(),
+    customLinks: {
+      type: [publicSiteHeaderLinkSchema],
+      default: () => [],
+      validate: {
+        validator: (values: Array<{ toObject?: () => unknown }>) => publicSiteHeaderLinksSchema.safeParse(
+          values.map((value) => value.toObject?.() ?? value),
+        ).success,
+        message: "Header links require valid groups, unique identifiers, safe destinations and at most one button.",
+      },
+    },
     navOrder: {
       type: [
         {
@@ -286,6 +346,7 @@ const publicSiteHeaderSchema = new Schema(
 
 const publicSiteFooterSchema = new Schema(
   {
+    customLinks: customLinksField(12),
     description: {
       type: localizedTextSchema,
       default: () => ({}),
@@ -518,6 +579,24 @@ const customerPortalNavigationItemSchema = new Schema(
 
 const publicSiteCustomerPortalSchema = new Schema(
   {
+    pageImages: {
+      type: new Schema(
+        Object.fromEntries(
+          CUSTOMER_PORTAL_PAGE_IMAGE_KEYS.map((page) => [
+            page,
+            {
+              type: String,
+              trim: true,
+              default: "",
+              maxlength: PUBLIC_SITE_LIMITS.URL,
+              validate: (value: string) => isSafePublicSiteUrl(value),
+            },
+          ]),
+        ),
+        { _id: false },
+      ),
+      default: () => ({}),
+    },
     courses: {
       type: new Schema(
         {

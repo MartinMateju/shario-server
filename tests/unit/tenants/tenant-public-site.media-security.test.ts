@@ -131,6 +131,39 @@ describe("tenant public-site media security", () => {
     });
   });
 
+  it.each([
+    "courses", "memberships", "vouchers", "knowledge", "bookings", "waitingList",
+    "credits", "account", "invoices", "notifications", "products",
+  ] as const)("uploads the %s hero to its own tenant-scoped slot and drafts only that page", async (page) => {
+    const slot = `${page}Hero` as const;
+    const result = await uploadTenantPublicSiteMedia({
+      tenantId: "tenant-alpha", slot, file: file(png(1200, 800)), revision: 8,
+    });
+    const upload = mocks.uploadBufferToR2.mock.calls[0]![0];
+    expect(upload.key).toMatch(new RegExp(`^public-sites/tenant-alpha/${slot}/[0-9]+-[0-9a-f-]+\\.png$`));
+    expect(mocks.updateTenantPublicSiteDraft).toHaveBeenCalledWith({
+      tenantId: "tenant-alpha", revision: 8,
+      patch: { customerPortal: { pageImages: { [page]: result.media.url } } },
+    });
+    expect(result.media.slot).toBe(slot);
+    expect(mocks.getTenantPublicSiteEditorState).not.toHaveBeenCalled();
+    expect(mocks.assertTenantLocationIdsExist).not.toHaveBeenCalled();
+  });
+
+  it("rejects location overrides on a page image and removes an upload if its draft revision conflicts", async () => {
+    await expect(uploadTenantPublicSiteMedia({
+      tenantId: "tenant-alpha", slot: "coursesHero", locationId: "507f1f77bcf86cd799439011",
+      file: file(png(1200, 800)),
+    })).rejects.toThrow("only supported for course images");
+    expect(mocks.uploadBufferToR2).not.toHaveBeenCalled();
+    mocks.updateTenantPublicSiteDraft.mockRejectedValueOnce(new Error("Draft revision conflict"));
+    await expect(uploadTenantPublicSiteMedia({
+      tenantId: "tenant-alpha", slot: "waitingListHero", revision: 8, file: file(png(1200, 800)),
+    })).rejects.toThrow("Draft revision conflict");
+    const upload = mocks.uploadBufferToR2.mock.calls[0]![0];
+    expect(mocks.deleteObjectFromR2).toHaveBeenCalledWith({ key: upload.key });
+  });
+
   it("stores a registration image in its own slot and patches only the registration draft", async () => {
     const result = await uploadTenantPublicSiteMedia({
       tenantId: "tenant-alpha",

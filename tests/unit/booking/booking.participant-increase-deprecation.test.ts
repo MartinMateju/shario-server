@@ -57,6 +57,7 @@ vi.mock("@/modules/booking/controllers/booking.read.controller.js", () => ({
   getBookingsByUserId: mocks.getBookingsByUserId,
   getBookingsHistory: mocks.getBookingsHistory,
   getBookingsWithFilters: mocks.getBookingsWithFilters,
+  getBookingFilterOptions: mocks.getBookings,
   getUserBookings: mocks.getUserBookings,
 }));
 

@@ -168,6 +168,7 @@ const workspaceLanguageSchema = z.preprocess(
 
 const notificationsInputSchema = z
   .object({
+    bookingCreated: z.boolean().optional(),
     bookingAssigned: z.boolean().optional(),
     bookingCancelled: z.boolean().optional(),
     taskAssigned: z.boolean().optional(),
@@ -201,6 +202,8 @@ export const workspacePreferencesInputSchema = z
       )
       .optional(),
     overviewLaunchCenterDismissed: z.boolean().optional(),
+    emailReadyBannerDismissed: z.boolean().optional(),
+    overviewAttentionDismissed: z.boolean().optional(),
     productTour: productTourPreferencesInputSchema.optional(),
     firstBookingCelebrationSeen: z.boolean().optional(),
     contextualGuides: contextualGuidesInputSchema.optional(),

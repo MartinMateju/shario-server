@@ -1,0 +1,37 @@
+# Owner and studio manager dashboard
+
+The management dashboard separates daily operations from period performance. It uses the existing daily overview for bookings and tasks, and a separate management response for month-to-date comparisons and reporting.
+
+## API
+
+- `GET /dashboard/management?date=YYYY-MM-DD&locationId=...` returns calculated facts. Both filters are optional. Workspace and report-view permissions are required, and individual sources retain their own permissions, module and plan checks.
+- `POST /dashboard/reports` accepts only `date`, `locationId` and `locale`. It creates a server-owned report snapshot and a grounded narrative using the existing AI orchestration. Generation additionally requires AI permission and entitlement and is rate limited.
+- `GET /dashboard/reports/:reportId/pdf` exports the saved snapshot. It requires report-export permission, the original creator and tenant, and continued access to the original locations and read permissions. It never accepts figures from the caller or recomputes the snapshot during export.
+
+Responses and PDF downloads use `Cache-Control: private, no-store`. Report facts contain integer minor currency units. The narrative and export format money using the currency's exponent.
+
+## Metric definitions
+
+- Reporting dates use the studio timezone. Month-to-date compares with the equivalent elapsed portion of the previous calendar month, capped at that month's last day. The hourly pattern has its own last-30-days window.
+- The main money card is **recorded payments**, using `summary.recordedPaymentsMinor`, `metadata.revenueBasis: recorded_net_payments`, and explicit workspace scope. It sums verified order, voucher and membership payments by original payment date after recorded external refunds. Stored-value redemption does not count a second time. It is not delivered revenue or net cash flow by refund date. A selected studio does not allocate shared payments to that branch; unrestricted financial access is required.
+- Incomplete payment history returns a known subtotal with `recordedPaymentsComplete: false`; unknown amounts or dates are excluded and percentage comparison is suppressed. If no amount is verifiable, the value is unavailable. Query limits never return a truncated total. The legacy delivered-revenue fields remain for rollout and saved-report compatibility: automatic booking `delivered` status is not completion evidence, and payments must not be relabelled as delivered revenue.
+- The system currently derives presence and visit patterns from booking records. The UI calls these expected presence, elapsed booked visits and scheduled starts, rather than verified check-ins. Unique and new customer counts describe identified customers in the authorized reporting scope; anonymous guests do not become invented customer identities.
+- Subscriber and unresolved-work counts are snapshots; additions, cancellations and resolutions are period events. Historical values must be unavailable when current records cannot reconstruct them. Active subscribers are deduplicated by customer and include active/cancellation-scheduled, unexpired memberships applicable to a selected studio, including all-location plans. The directory uses the unpaginated `/users/summary` aggregate, independently of list filters; its scope is the entire authorized workspace or authorized locations.
+- Voucher sales and redemptions are separate measures. Redemption toward a future booking is not evidence that the service was delivered.
+- Top-customer rows include the tenant's customer-facing `memberNumber` and `spentMonthMinor` / `spentTotalMinor`. The default ranking uses verified monthly customer spending across the workspace, independently of reservations or registration dates; the optional visits ranking retains the selected studio scope. Spending requires unrestricted location access plus customer, order, payment, voucher and membership read permissions and the corresponding modules/plan entitlement. Selecting one studio does not remove an otherwise authorized owner's workspace spending access; a branch-restricted manager receives unavailable amounts. `revenueComplete: false` marks an incomplete ranking and `spentMonthComplete: false` marks a customer's known subtotal.
+- Top 3 products uses settled purchases over the last 30 tenant-calendar days through the selected cutoff, with its own explicit `period` and `basis: paid_purchases`. `scope` is `workspace` for unrestricted staff: this includes ordinary orders across all studios and standalone paid voucher products from `CouponOrder.product`. Location-restricted staff see `selected_locations`; unassignable voucher purchases are excluded with an explicit partial-data notice. `purchaseCount` counts each product once per paid ordinary or voucher order; `quantity` separately counts units. Unpaid, cancelled, fully refunded, and generic wallet top-up orders without a product identity are excluded; catalog credit-pack products are included. Course cancellations reduce retained quantities. Incomplete product or payment-date records are disclosed; service completion is not required.
+- Customer spending counts confirmed order cash, voucher purchases and membership invoice payments, less recorded external refunds. Stored-value purchases count once; later redemption does not. Monthly spending is the net value of payments dated in that month through the selected cutoff, not the month's net cash flow: refunds of older payments remain attributed to those older payments. Total spending includes payments before the cutoff. Current lifetime totals can include confirmed undated payments, but their month is unavailable. Historical undated payments or cumulative refunds without event history, conflicting currencies and uncertain amounts remain unavailable. Reads are bounded and never return a truncated financial total.
+
+`null` means unavailable, while `0` means an available source had no qualifying records. Coverage metadata explains disabled sources, missing permissions, incomplete history and other limits. Tenant-facing wording must preserve that distinction.
+
+## AI report and PDF
+
+The server calculates facts before requesting a narrative. The AI receives authorized aggregate facts, not customer names or free-form order descriptions. Unsupported numeric or causal claims fall back to the deterministic summary, which is explicitly labelled. The saved report includes the original snapshot, narrative, formatted tables, date range, scope and generation time.
+
+A saved snapshot containing workspace-wide payment totals or customer spending retains the unrestricted-access requirement even when other metrics use one selected studio. Revoking unrestricted location access prevents later retrieval/export of that snapshot. Customer identities and individual spending are not included in the AI prompt. New report facts use major-unit `recordedPayments` and the explicit payment basis; historical delivery-based snapshots retain their original interpretation.
+
+PDF rendering uses bundled Unicode fonts for Czech and other supported text, wraps long content and paginates tables. Exporting an existing report does not trigger another AI request.
+
+## Validation
+
+The dashboard unit tests cover input validation, authenticated request context, permissions, date comparisons, calculations, source scope, report grounding and snapshot export. They are included in `test:critical`. Run the production build before deploying the backend, then deploy the corresponding client change.

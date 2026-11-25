@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { isIP } from "node:net";
 import type { Request } from "express";
 
 import { AppError, forbidden } from "@/shared/http/httpErrors.js";
@@ -8,6 +9,7 @@ export const AUTH_PROXY_HEADERS = {
   TIMESTAMP: "x-shario-auth-proxy-timestamp",
   NONCE: "x-shario-auth-proxy-nonce",
   SIGNATURE: "x-shario-auth-proxy-signature",
+  CLIENT_IP: "x-shario-auth-proxy-client-ip",
 } as const;
 
 const AUTH_PROXY_SIGNATURE_VERSION = "shario-auth-proxy-v1";
@@ -17,6 +19,7 @@ const MINIMUM_PROXY_SECRET_BYTES = 32;
 export type AuthRequestContext = {
   origin?: string;
   firstPartyProxy: boolean;
+  clientIp?: string;
 };
 
 type SignatureInput = {
@@ -26,6 +29,7 @@ type SignatureInput = {
   method: string;
   path: string;
   origin: string;
+  clientIp?: string;
   cookieHeader?: string;
   body?: unknown;
 };
@@ -130,16 +134,18 @@ const buildCanonicalProxyRequest = ({
   method,
   path,
   origin,
+  clientIp,
   cookieHeader,
   body,
 }: Omit<SignatureInput, "secret">): string =>
   [
-    AUTH_PROXY_SIGNATURE_VERSION,
+    clientIp ? "shario-auth-proxy-v2" : AUTH_PROXY_SIGNATURE_VERSION,
     timestamp,
     normalizeProxyNonce(nonce),
     method.trim().toUpperCase(),
     normalizeProxyTarget(path),
     normalizeProxyOrigin(origin),
+    ...(clientIp ? [clientIp] : []),
     hashCookieHeader(cookieHeader),
     hashRequestBody(body),
   ].join("\n");
@@ -228,10 +234,13 @@ export const resolveAuthRequestContext = async (
   now = Date.now(),
   claimNonce: ClaimAuthProxyNonce = claimAuthProxyNonce,
 ): Promise<AuthRequestContext> => {
+  const preparedContext = preparedRateLimitContexts.get(req);
+  if (preparedContext) return preparedContext;
   const forwardedOrigin = req.get(AUTH_PROXY_HEADERS.ORIGIN);
   const timestamp = req.get(AUTH_PROXY_HEADERS.TIMESTAMP);
   const nonce = req.get(AUTH_PROXY_HEADERS.NONCE);
   const signature = req.get(AUTH_PROXY_HEADERS.SIGNATURE);
+  const clientIp = req.get(AUTH_PROXY_HEADERS.CLIENT_IP);
   const proxyHeaderCount = [
     forwardedOrigin,
     timestamp,
@@ -240,6 +249,7 @@ export const resolveAuthRequestContext = async (
   ].filter((value) => Boolean(String(value ?? "").trim())).length;
 
   if (proxyHeaderCount === 0) {
+    if (clientIp !== undefined) invalidProxyRequest();
     const origin = normalizeProxyOrigin(req.get("origin"));
 
     return {
@@ -251,6 +261,8 @@ export const resolveAuthRequestContext = async (
   if (proxyHeaderCount !== 4) {
     invalidProxyRequest();
   }
+  if (clientIp !== undefined && (!clientIp || !isIP(clientIp)))
+    invalidProxyRequest();
 
   const origin = normalizeProxyOrigin(forwardedOrigin);
   const path = normalizeProxyTarget(req.originalUrl || req.url);
@@ -281,6 +293,7 @@ export const resolveAuthRequestContext = async (
     method: req.method,
     path,
     origin,
+    clientIp,
     cookieHeader: req.get("cookie"),
     body: req.body,
   });
@@ -314,5 +327,29 @@ export const resolveAuthRequestContext = async (
   return {
     origin,
     firstPartyProxy: true,
+    ...(clientIp ? { clientIp } : {}),
   };
 };
+
+// Only the server middleware can prepare this context. Keep it outside the
+// request's public fields so client headers/body cannot impersonate verification.
+// Controllers reuse the completed check within this one request; a separate
+// HTTP request still has to claim the nonce and cannot replay it.
+const preparedRateLimitContexts = new WeakMap<Request, AuthRequestContext>();
+
+export const prepareAuthRateLimitContext = async (
+  req: Request,
+): Promise<void> => {
+  if (
+    Object.values(AUTH_PROXY_HEADERS).some(
+      (header) => req.get(header) !== undefined,
+    )
+  ) {
+    const context = await resolveAuthRequestContext(req);
+    preparedRateLimitContexts.set(req, context);
+  }
+};
+
+export const getVerifiedAuthProxyClientIp = (
+  req: Request,
+): string | undefined => preparedRateLimitContexts.get(req)?.clientIp;

@@ -76,6 +76,7 @@ type LocationSchemaType = {
   };
 
   access: {
+    emailTemplate?: import("@/modules/access-codes/door-access-email-template.js").DoorAccessEmailTemplate;
     automaticEmailEnabled?: boolean;
     publicInstructions: string;
     privateInstructions: string;
@@ -269,6 +270,8 @@ export const locationSchema = new Schema<LocationSchemaType>(
     },
 
     access: {
+      // Edited only via the permission- and location-scoped door-email API.
+      emailTemplate: { type: Schema.Types.Mixed, select: false },
       automaticEmailEnabled: { type: Boolean, default: false },
       publicInstructions: { type: String, trim: true, default: "" },
       privateInstructions: {

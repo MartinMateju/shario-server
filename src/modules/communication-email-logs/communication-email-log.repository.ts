@@ -22,20 +22,26 @@ const escapeRegex = (value: string): string => {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 };
 
+export const buildCommunicationEmailLogScope = (
+  tenantId: string,
+  allowedLocationIds?: readonly string[] | null,
+): EmailLogQuery => ({
+  tenant: toObjectId(tenantId),
+  ...(allowedLocationIds == null
+    ? {}
+    : {
+        location: { $in: allowedLocationIds.map(toObjectId) },
+        appliesToAllLocations: false,
+      }),
+});
+
 const buildBaseQuery = async (
   filters: CommunicationEmailLogListFilters,
 ): Promise<EmailLogQuery> => {
-  const query: EmailLogQuery = {
-    tenant: toObjectId(filters.tenantId),
-  };
-
-  if (
-    filters.allowedLocationIds !== null &&
-    filters.allowedLocationIds !== undefined
-  ) {
-    query.location = { $in: filters.allowedLocationIds.map(toObjectId) };
-    query.appliesToAllLocations = false;
-  }
+  const query = buildCommunicationEmailLogScope(
+    filters.tenantId,
+    filters.allowedLocationIds,
+  );
 
   if (filters.status && filters.status !== "all") {
     query.status = filters.status;

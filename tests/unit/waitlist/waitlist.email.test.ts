@@ -84,6 +84,28 @@ const managementEntry = (overrides: Record<string, unknown> = {}) => {
 };
 
 describe("waitlist email outbox", () => {
+  it("keeps scheduled management links on the active primary custom domain", async () => {
+    const outbox = {
+      _id: "507f1f77bcf86cd799439099", tenant: TENANT_ID, entry: ENTRY_ID,
+      recipientEmail: "ada@example.test", recipientName: "Ada Lovelace",
+      type: "waitlist_joined", tokenPurpose: "manage", tokenGeneration: 1,
+      deduplicationKey: `waitlist:${ENTRY_ID}:joined`,
+    };
+    mocks.outboxFindOneAndUpdate
+      .mockReturnValueOnce(query(outbox))
+      .mockReturnValueOnce(query({ ...outbox, attempts: 1 }))
+      .mockReturnValueOnce(query(null));
+    mocks.entryFindOne.mockReturnValue(query(managementEntry({ locale: "cs" })));
+    mocks.tenantFindById.mockReturnValue(query({
+      slug: "common-ground", name: "Atelier Klei", plan: "studio_plus", planVersion: 3,
+      domains: [{ hostname: "booking.commonground.example", type: "custom", status: "active", isPrimary: true }],
+    }));
+    mocks.sendEmail.mockResolvedValue({ providerMessageId: "provider-1" });
+    await expect(processWaitlistEmailOutbox()).resolves.toBe(1);
+    const mail = mocks.sendEmail.mock.calls[0][0];
+    expect(mail.text).toContain("https://booking.commonground.example/cs/waitlists/manage#manage=");
+    expect(mail.text).not.toContain("common-ground.shario.io");
+  });
   beforeEach(() => {
     vi.clearAllMocks();
     vi.stubEnv("CLIENT_URL", "http://shario.localhost:3000");

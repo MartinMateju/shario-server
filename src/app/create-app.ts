@@ -7,6 +7,7 @@ import { apiRouter } from "@/app/routes.js";
 import { isCorsOriginAllowed } from "@/config/cors-origin.js";
 import { isE2ETestMode } from "@/config/e2e-mode.js";
 import { env } from "@/config/env.js";
+import operationsRoutes from "@/infrastructure/operations/operations.routes.js";
 import webhookRoutes from "@/modules/checkout/checkout.webhook.routes.js";
 import postmarkOutboundWebhookRoutes from "@/modules/communications/routes/postmark-outbound-webhook.routes.js";
 import tenantPaymentConnectWebhookRoutes from "@/modules/tenant-payments/routes/tenant-payment-connect.webhook.routes.js";
@@ -111,6 +112,7 @@ export const createApp = (options: CreateAppOptions = {}) => {
     app.use("/__e2e", options.testControlRouter);
   }
 
+  app.use("/internal/operations", operationsRoutes);
   app.use(apiRouter);
   app.use(notFound);
   app.use(errorHandler as ErrorRequestHandler);

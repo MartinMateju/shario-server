@@ -287,6 +287,7 @@ describe("Booking extensions: quotes, capacity holds, paid fulfillment and refun
     await TenantPaymentAccount.collection.insertOne({
       tenant,
       stripeAccountId: accountId,
+      livemode: false,
     });
     retrieveSession = vi.spyOn(
       getTenantPaymentStripe().checkout.sessions,

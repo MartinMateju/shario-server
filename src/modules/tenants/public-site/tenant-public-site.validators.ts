@@ -9,8 +9,10 @@ import {
 import {
   CUSTOMER_PORTAL_NAVIGATION_KEYS,
   CUSTOMER_PORTAL_PAGE_IDS,
+  CUSTOMER_PORTAL_PAGE_IMAGE_KEYS,
   type CustomerPortalNavigationKey,
   type CustomerPortalPageId,
+  type CustomerPortalPageImageKey,
   PUBLIC_SITE_LIMITS,
   PUBLIC_SITE_LOGO_SIZE,
   PUBLIC_SITE_FONT_PRESETS,
@@ -249,8 +251,83 @@ const announcementPatchSchema = z
     message: "At least one announcement setting must be provided.",
   });
 
+const customLinkUrl = z
+  .string()
+  .refine((value) => !/[\\\u0000-\u001F\u007F]/.test(value), {
+    message: "Backslashes and control characters are not allowed in links.",
+  })
+  .pipe(safeUrl());
+
+export const publicSiteCustomLinkSchema = z
+  .object({
+    id: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/),
+    label: localizedTextPatchSchema(80),
+    href: z.object(Object.fromEntries(
+      ROLLOUT_ELIGIBLE_APP_LOCALES.map((locale) => [locale, customLinkUrl.optional()]),
+    ) as Record<RolloutEligibleAppLocale, z.ZodOptional<typeof customLinkUrl>>).strict(),
+  })
+  .strict()
+  .superRefine((link, ctx) => {
+    let hasCompleteLocale = false;
+    for (const locale of ROLLOUT_ELIGIBLE_APP_LOCALES) {
+      const label = Boolean(link.label[locale]);
+      const href = Boolean(link.href[locale]);
+      if (label && href) hasCompleteLocale = true;
+      if (label !== href) ctx.addIssue({
+        code: "custom",
+        path: [label ? "href" : "label", locale],
+        message: "Provide both link text and a destination for this language.",
+      });
+    }
+    if (!hasCompleteLocale) ctx.addIssue({
+      code: "custom",
+      path: ["label"],
+      message: "Provide link text and a destination in at least one language.",
+    });
+  });
+
+export const publicSiteCustomLinksSchema = (limit: number) => z
+  .array(publicSiteCustomLinkSchema)
+  .max(limit)
+  .refine((links) => hasUniqueValues(links.map((link) => link.id)), {
+    message: "Custom link identifiers must be unique.",
+  });
+
+const publicSiteHeaderChildLinkSchema = publicSiteCustomLinkSchema.safeExtend({
+  separatorBefore: z.boolean().optional(),
+});
+
+export const publicSiteHeaderLinkSchema = z.union([
+  publicSiteCustomLinkSchema.safeExtend({ emphasis: z.literal("button").optional() }),
+  z.object({
+    id: publicSiteCustomLinkSchema.shape.id,
+    label: localizedTextPatchSchema(80).refine(
+      (labels) => Object.values(labels).some(Boolean),
+      "Provide a group label in at least one language.",
+    ),
+    children: z.array(publicSiteHeaderChildLinkSchema).min(1).max(8).refine(
+      (links) => hasUniqueValues(links.map((link) => link.id)),
+      "Child link identifiers must be unique within their group.",
+    ),
+  }).strict(),
+]);
+
+export const publicSiteHeaderLinksSchema = z.array(publicSiteHeaderLinkSchema)
+  .max(8)
+  .refine((links) => hasUniqueValues(links.map((link) => link.id)), {
+    message: "Header link identifiers must be unique.",
+  })
+  .refine((links) => links.filter((link) => "emphasis" in link && link.emphasis === "button").length <= 1, {
+    message: "Only one header link can be displayed as a button.",
+  });
+
 const headerPatchSchema = z
   .object({
+    layout: z.enum(["default", "website"]).optional(),
+    backgroundColor: inheritableColor.optional(),
+    linkColor: inheritableColor.optional(),
+    buttonColor: inheritableColor.optional(),
+    customLinks: publicSiteHeaderLinksSchema.optional(),
     navOrder: navOrderSchema.optional(),
     hiddenItems: hiddenItemsSchema.optional(),
     primaryCta: z.enum(PUBLIC_SITE_PRIMARY_CTAS).optional(),
@@ -287,6 +364,7 @@ const legalPatchSchema = z
 
 const footerPatchSchema = z
   .object({
+    customLinks: publicSiteCustomLinksSchema(12).optional(),
     description: localizedTextPatchSchema().optional(),
     openingHours: localizedTextPatchSchema(
       PUBLIC_SITE_LIMITS.OPENING_HOURS,
@@ -436,8 +514,21 @@ const customerPortalNavigationPatchSchema = z
     message: "At least one customer-portal navigation item must be provided.",
   });
 
+const pageImageUrlSchema = safeUrl();
+const customerPortalPageImagesPatchSchema = z
+  .object(
+    Object.fromEntries(
+      CUSTOMER_PORTAL_PAGE_IMAGE_KEYS.map((page) => [page, pageImageUrlSchema.optional()]),
+    ) as Record<CustomerPortalPageImageKey, z.ZodOptional<typeof pageImageUrlSchema>>,
+  )
+  .strict()
+  .refine((value) => Object.keys(value).length > 0, {
+    message: "At least one page image must be provided.",
+  });
+
 const customerPortalPatchSchema = z
   .object({
+    pageImages: customerPortalPageImagesPatchSchema.optional(),
     courses: z.object({
       guestCheckoutEnabled: z.boolean().optional(),
       locations: z.array(z.object({

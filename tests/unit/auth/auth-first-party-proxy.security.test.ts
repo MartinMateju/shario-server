@@ -30,6 +30,7 @@ type RequestInput = {
   timestamp?: string;
   nonce?: string;
   signature?: string;
+  clientIp?: string;
 };
 
 const createSignedRequest = ({
@@ -42,6 +43,7 @@ const createSignedRequest = ({
   timestamp = String(NOW),
   nonce = "0123456789abcdefABCDEF",
   signature,
+  clientIp,
 }: RequestInput = {}): Request => {
   const headers: Record<string, string> = {
     [AUTH_PROXY_HEADERS.ORIGIN]: origin,
@@ -56,6 +58,7 @@ const createSignedRequest = ({
         method,
         path: target,
         origin,
+        clientIp,
         cookieHeader: cookie,
         body,
       }),
@@ -63,6 +66,7 @@ const createSignedRequest = ({
 
   if (ordinaryOrigin) headers.origin = ordinaryOrigin;
   if (cookie) headers.cookie = cookie;
+  if (clientIp !== undefined) headers[AUTH_PROXY_HEADERS.CLIENT_IP] = clientIp;
 
   return {
     method,
@@ -81,6 +85,35 @@ const resolve = (
 ) => resolveAuthRequestContext(request, NOW, claimNonce);
 
 describe("signed first-party authentication proxy", () => {
+  it("matches the IP-bound frontend v2 interoperability vector", () => {
+    expect(
+      createAuthProxySignature({
+        secret: "test-proxy-secret-with-at-least-32-bytes",
+        timestamp: "1795000000000",
+        nonce: "fixed-nonce-with-24-bytes-12345678",
+        method: "POST",
+        path: "/auth/customer/refresh?source=booking",
+        origin: "https://booking.example-space.com",
+        clientIp: "203.0.113.42",
+        cookieHeader: "customerRefreshToken=opaque; preference=cs",
+        body: { nested: { z: 1, a: true }, list: [{ b: "two", a: "one" }] },
+      }),
+    ).toBe("4e8d628e4e709d3ce8f885164949e368edb0bc6d3221b302ba5f12c9d18b6f52");
+  });
+  it("matches the custom-domain frontend HMAC interoperability vector", () => {
+    expect(
+      createAuthProxySignature({
+        secret: "test-proxy-secret-with-at-least-32-bytes",
+        timestamp: "1795000000000",
+        nonce: "fixed-nonce-with-24-bytes-12345678",
+        method: "POST",
+        path: "/auth/customer/refresh?source=booking",
+        origin: "https://booking.example-space.com",
+        cookieHeader: "customerRefreshToken=opaque; preference=cs",
+        body: { nested: { z: 1, a: true }, list: [{ b: "two", a: "one" }] },
+      }),
+    ).toBe("2bf05245181811adfd0e6289110ca142040c1d44fbd2231c28f1157c6c2f8989");
+  });
   beforeEach(() => {
     acceptNonce.mockClear();
     redisSet.mockReset();
@@ -98,6 +131,65 @@ describe("signed first-party authentication proxy", () => {
       firstPartyProxy: true,
     });
     expect(acceptNonce).toHaveBeenCalledWith("0123456789abcdefABCDEF", 61_000);
+  });
+
+  it.each(["203.0.113.42", "2001:db8:0:0:0:0:0:1"])(
+    "accepts the signed client IP %s without rewriting its representation",
+    async (clientIp) => {
+      await expect(resolve(createSignedRequest({ clientIp }))).resolves.toEqual(
+        {
+          origin: ORIGIN,
+          firstPartyProxy: true,
+          clientIp,
+        },
+      );
+    },
+  );
+
+  it.each([
+    "",
+    "203.0.113.42, 198.51.100.1",
+    "unknown",
+    "https://studio.example",
+  ])(
+    "rejects malformed proxy client IP %j before claiming a nonce",
+    async (clientIp) => {
+      await expect(
+        resolve(createSignedRequest({ clientIp })),
+      ).rejects.toMatchObject({ code: "AUTH_FIRST_PARTY_PROXY_INVALID" });
+      expect(acceptNonce).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    ["203.0.113.42", "198.51.100.2"],
+    ["203.0.113.42", undefined],
+    [undefined, "203.0.113.42"],
+  ])(
+    "rejects replacing the signed client IP %s with %s",
+    async (signedIp, forwardedIp) => {
+      const req = createSignedRequest({ clientIp: signedIp });
+      const originalGet = req.get.bind(req);
+      req.get = ((name: string) =>
+        name === AUTH_PROXY_HEADERS.CLIENT_IP
+          ? forwardedIp
+          : originalGet(name)) as Request["get"];
+      await expect(resolve(req)).rejects.toMatchObject({
+        code: "AUTH_FIRST_PARTY_PROXY_INVALID",
+      });
+      expect(acceptNonce).not.toHaveBeenCalled();
+    },
+  );
+
+  it("rejects an unsigned client IP header on a direct request", async () => {
+    const req = {
+      get: (name: string) =>
+        name === AUTH_PROXY_HEADERS.CLIENT_IP ? "203.0.113.42" : undefined,
+    } as unknown as Request;
+    await expect(resolve(req)).rejects.toMatchObject({
+      code: "AUTH_FIRST_PARTY_PROXY_INVALID",
+    });
+    expect(acceptNonce).not.toHaveBeenCalled();
   });
 
   it("durably claims a hashed nonce with Redis NX and the caller TTL", async () => {

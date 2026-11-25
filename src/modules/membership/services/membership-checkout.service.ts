@@ -1,3 +1,5 @@
+import { PaymentRefundReconciliation } from "@/modules/tenant-payments/payment-refund-reconciliation.model.js";
+import { serializeRefundSummary } from "@/modules/tenant-payments/payment-refund-summary.js";
 import { createHash } from "node:crypto";
 import mongoose from "mongoose";
 
@@ -389,10 +391,8 @@ export const membershipCheckoutService = {
       "stripe.checkoutSessionId": sessionId,
     }).select("+stripe.connectedAccountId +stripe.checkoutSessionId").exec();
     if (!membership) notFound("Membership checkout not found.");
-    const session = await retrieveMembershipCheckoutSession(
-      (membership as any).stripe.connectedAccountId,
-      sessionId,
-    );
+    const connectedAccountId = (membership as any).stripe.connectedAccountId;
+    const session = await retrieveMembershipCheckoutSession(connectedAccountId, sessionId);
     if (membership.status === MEMBERSHIP_STATUS.PENDING) {
       await recoverMembershipCheckout({
         membership,
@@ -405,7 +405,15 @@ export const membershipCheckoutService = {
         user: toObjectId(userId),
       }).exec() ?? membership;
     }
+    const paymentIntentId = typeof session.payment_intent === "string" ? session.payment_intent : session.payment_intent?.id;
+    const invoiceId = typeof session.invoice === "string" ? session.invoice : session.invoice?.id;
+    const refundRecord = await PaymentRefundReconciliation.findOne({ tenant: tenantId, connectedAccountId,
+      ...(paymentIntentId ? { paymentIntentId } : invoiceId ? { stripeInvoiceId: invoiceId } : { membership: membership._id }),
+    }).sort({ updatedAt: -1 }).lean().exec() as any;
     return {
+      refund: serializeRefundSummary(refundRecord?.summary),
+      refundReviewRequired: Boolean(refundRecord?.reviewRequired || (membership.status === MEMBERSHIP_STATUS.PENDING && refundRecord)),
+      currency: membership.currency,
       membership: serializeMembership(membership),
       checkout: {
         sessionId,

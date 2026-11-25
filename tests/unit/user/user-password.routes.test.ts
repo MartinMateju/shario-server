@@ -42,6 +42,7 @@ vi.mock("@/modules/booking/controllers/booking.read.controller.js", () => ({
 
 vi.mock("@/modules/user/controllers/user.read.controller.js", () => ({
   getCustomerById: mocks.pass,
+  getCustomerSummary: mocks.pass,
   getAllUsers: mocks.pass,
   getUserbyCustomId: mocks.pass,
   getUsersWithFilters: mocks.pass,

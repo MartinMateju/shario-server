@@ -6,6 +6,7 @@ import {
   allocateOrderForReport,
   averageLinkedCustomerSpend,
   bookingReservations,
+  bookingSeats,
   buildUtilizationSeries,
   changePercent,
   finalizeTopProducts,
@@ -223,6 +224,29 @@ describe("report deterministic calculations", () => {
     expect(bookingReservations({ ...booking, orders: [] })).toBe(0);
     expect(
       bookingReservations({ ...booking, orders: [], numberOfGuests: 1 }),
+    ).toBe(1);
+  });
+
+  it("uses the managed attendance roster for participant-hours without inventing a minimum seat", () => {
+    const empty = {
+      tag: "open-studio",
+      attendanceManaged: true,
+      numberOfGuests: 0,
+      participants: [{ attendanceStatus: "removed" }],
+    };
+    expect(bookingSeats(empty)).toBe(0);
+    expect(
+      bookingSeats({
+        ...empty,
+        numberOfGuests: 5,
+        participants: [
+          { attendanceStatus: "active" },
+          { attendanceStatus: "removed" },
+        ],
+      }),
+    ).toBe(1);
+    expect(
+      bookingSeats({ tag: "open-studio", numberOfGuests: 0, participants: [] }),
     ).toBe(1);
   });
 

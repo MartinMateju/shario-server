@@ -1,5 +1,6 @@
 import mongoose from "mongoose";
 import { z } from "zod";
+import { partialWithoutDefaults } from "@/shared/validation/partialWithoutDefaults.js";
 
 import {
   DEFAULT_SUPPLY_ORDER_LIMIT,
@@ -62,7 +63,7 @@ export const createSupplyOrderSchema = z.object({
   requestedByUser: optionalObjectIdSchema("requestedByUser"),
 });
 
-export const updateSupplyOrderSchema = createSupplyOrderSchema.partial();
+export const updateSupplyOrderSchema = partialWithoutDefaults(createSupplyOrderSchema);
 
 export const supplyOrderIdParamsSchema = z.object({
   id: objectIdSchema("supply order id"),
@@ -101,7 +102,7 @@ export const createSupplierSchema = z.object({
   isActive: z.coerce.boolean().default(true),
 });
 
-export const updateSupplierSchema = createSupplierSchema.partial();
+export const updateSupplierSchema = partialWithoutDefaults(createSupplierSchema);
 
 export const supplierIdParamsSchema = z.object({
   id: objectIdSchema("supplier id"),

@@ -45,7 +45,6 @@ import membershipRoutes, {
   customerMembershipRouter,
   publicMembershipRouter,
 } from "@/modules/membership/routes/membership.routes.js";
-import metadataRoutes from "@/modules/metadata/routes/metadata.routes.js";
 import publicMediaRouter from "@/modules/media/public-media.routes.js";
 import moneyCreditRoutes from "@/modules/money-credit/routes/money-credit.routes.js";
 import notificationRoutes from "@/modules/notification/routes/notification.routes.js";
@@ -315,7 +314,6 @@ apiRouter.use(
   emailTemplateRoutes,
 );
 
-apiRouter.use("/metadata", requireWorkspaceSession, metadataRoutes);
 apiRouter.use("/dashboard", requireWorkspaceSession, dashboardRoutes);
 apiRouter.use("/reports", requireWorkspaceSession, reportsRoutes);
 apiRouter.use("/ai", requireWorkspaceSession, aiModule, aiRouter);

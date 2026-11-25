@@ -3,13 +3,19 @@ import dayjs from "dayjs";
 import { z } from "zod";
 
 import { badRequest, unauthorized } from "@/shared/http/httpErrors.js";
-import { DEFAULT_TIMEZONE } from "@/shared/time/time.utils.js";
+import {
+  DEFAULT_TIMEZONE,
+  parseDateStringInTimezone,
+} from "@/shared/time/time.utils.js";
 import { locationRepository } from "@/modules/location/location.repository.js";
 import { createOrderRepository } from "@/modules/order/order.repository.js";
 import { createProductRepository } from "@/modules/product/product.repository.js";
 import { createStaffRepository } from "@/modules/staff/staff.repository.js";
 import { findTenantById } from "@/modules/tenants/tenant.repository.js";
 import { createUserRepository } from "@/modules/user/user.repository.js";
+import { parseUserMemberNumber } from "@/modules/user/user-member-number.service.js";
+import { Product } from "@/modules/product/product.model.js";
+import Booking from "../booking.model.js";
 
 import {
   BOOKING_STATUS,
@@ -34,11 +40,14 @@ type ListBookingsWithFiltersInput = {
   search?: string;
   dateFrom?: string;
   dateTo?: string;
+  dateScope?: "today";
   endAfter?: string;
   lecturerId?: string;
+  lecturerName?: string;
   productId?: string;
   authorId?: string;
   paymentStatus?: string;
+  status?: string;
   locationId?: string;
   page?: number | string;
   limit?: number | string;
@@ -70,12 +79,57 @@ const parsePositiveInt = (
 const escapeRegex = (value: string): string =>
   value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-const parseDate = (value?: string): Date | null => {
+const optionalText = (max: number) => z.string().trim().max(max).optional();
+const optionalMongoId = z
+  .union([z.literal(""), z.string().regex(/^[a-f0-9]{24}$/i)])
+  .optional();
+const bookingDirectoryInput = z
+  .object({
+    search: optionalText(160).default(""),
+    dateFrom: optionalText(40),
+    dateTo: optionalText(40),
+    dateScope: z.literal("today").optional(),
+    endAfter: z.iso.datetime({ offset: true }).optional(),
+    lecturerId: optionalText(200),
+    // Stored snapshots can contain historical whitespace. The option's value
+    // round-trips literally; its label is trimmed for display only.
+    lecturerName: z.string().max(200).optional(),
+    productId: optionalMongoId,
+    authorId: optionalText(160),
+    paymentStatus: z
+      .union([z.literal(""), z.enum(Object.values(PAYMENT_STATUS))])
+      .optional(),
+    status: z
+      .union([z.literal(""), z.enum(Object.values(BOOKING_STATUS))])
+      .optional(),
+    locationId: optionalMongoId,
+    page: z.coerce.number().int().min(1).max(10_000).default(1),
+    limit: z.coerce.number().int().min(1).max(100).default(8),
+    sortBy: z.enum(["start", "end", "createdAt"]).default("start"),
+    sortOrder: z.enum(["asc", "desc"]).default("desc"),
+    allowedLocationIds: z
+      .array(z.string().regex(/^[a-f0-9]{24}$/i))
+      .nullable()
+      .optional(),
+  })
+  .refine((input) => !(input.lecturerName && input.lecturerId), {
+    message: "Choose one lecturer filter.",
+  });
+
+const parseDirectoryDate = (
+  value: string | undefined,
+  timezone: string,
+  end: boolean,
+): Date | null => {
   if (!value) return null;
-
-  const date = new Date(value);
-
-  return Number.isNaN(date.getTime()) ? null : date;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    const date = parseDateStringInTimezone(value, timezone);
+    if (!date) badRequest("Invalid booking date.");
+    return (end ? date.endOf("day") : date.startOf("day")).toDate();
+  }
+  const timestamp = z.iso.datetime({ offset: true }).safeParse(value);
+  if (!timestamp.success) badRequest("Invalid booking date.");
+  return new Date(timestamp.data);
 };
 
 const endAfterSchema = z.iso.datetime({ offset: true });
@@ -118,6 +172,7 @@ const emptyBookingsPage = (currentPage: number, pageSize: number) => ({
     totalBookings: 0,
     todayBookings: 0,
     awaitingPaymentBookings: 0,
+    cancelledBookings: 0,
   },
 });
 
@@ -359,24 +414,33 @@ export const listBookingsWithFilters = async ({
     search = "",
     dateFrom,
     dateTo,
+    dateScope,
     endAfter,
     lecturerId,
+    lecturerName,
     productId,
     authorId,
     paymentStatus,
+    status,
     locationId,
     page = 1,
     limit = 8,
     sortBy = "start",
     sortOrder = "desc",
     allowedLocationIds,
-  } = input;
+  } = (() => {
+    const parsed = bookingDirectoryInput.safeParse(input);
+    if (!parsed.success) badRequest("Invalid booking filters.");
+    return parsed.data;
+  })();
 
   const pageNumber = parsePositiveInt(page, 1, 10_000);
   const pageSize = parsePositiveInt(limit, 8, 100);
   const skip = (pageNumber - 1) * pageSize;
 
   const filter: Record<string, unknown> = {};
+
+  if (status) filter.status = status;
 
   if (endAfter !== undefined) {
     const parsed = endAfterSchema.safeParse(endAfter);
@@ -419,15 +483,7 @@ export const listBookingsWithFilters = async ({
       ];
     } else {
       const safeSearch = escapeRegex(searchValue);
-      const parsedMemberNumber = /^\d+$/.test(searchValue)
-        ? Number(searchValue)
-        : null;
-      const memberNumber =
-        parsedMemberNumber !== null &&
-        Number.isSafeInteger(parsedMemberNumber) &&
-        parsedMemberNumber > 0
-          ? parsedMemberNumber
-          : null;
+      const memberNumber = parseUserMemberNumber(searchValue);
       const textMatch = { $regex: safeSearch, $options: "i" };
       // Resolve related records inside this tenant; the booking query still
       // intersects the selected/authorized location and every other filter.
@@ -485,23 +541,36 @@ export const listBookingsWithFilters = async ({
     }
   }
 
-  const fromDate = parseDate(dateFrom);
-  const toDate = parseDate(dateTo);
+  const timezone = await resolveSummaryTimezone(tenantId, locationValue);
+  const today = dayjs().tz(timezone);
+  const fromDate = parseDirectoryDate(dateFrom, timezone, false);
+  const toDate = parseDirectoryDate(dateTo, timezone, true);
+  if (fromDate && toDate && fromDate > toDate)
+    badRequest("Booking date range is reversed.");
+  if (dateScope === "today") {
+    filter.$and = [
+      {
+        start: {
+          $gte: today.startOf("day").toDate(),
+          $lte: today.endOf("day").toDate(),
+        },
+      },
+    ];
+  }
 
   if (fromDate || toDate) {
     const startFilter: Record<string, Date> = {};
 
     if (fromDate) startFilter.$gte = fromDate;
 
-    if (toDate) {
-      toDate.setHours(23, 59, 59, 999);
-      startFilter.$lte = toDate;
-    }
+    if (toDate) startFilter.$lte = toDate;
 
     filter.start = startFilter;
   }
 
   const lecturerValue = lecturerId?.trim();
+
+  if (lecturerName) filter.lecturer = lecturerName;
 
   if (lecturerValue) {
     if (mongoose.isValidObjectId(lecturerValue)) {
@@ -542,13 +611,9 @@ export const listBookingsWithFilters = async ({
     if (mongoose.isValidObjectId(authorValue)) {
       filter.createdBy = toObjectId(authorValue);
     } else {
-      const parsedMemberNumber = /^\d+$/.test(authorValue)
-        ? Number(authorValue)
-        : null;
+      const parsedMemberNumber = parseUserMemberNumber(authorValue);
       const user = await userRepository.findOne(
-        parsedMemberNumber !== null &&
-          Number.isSafeInteger(parsedMemberNumber) &&
-          parsedMemberNumber > 0
+        parsedMemberNumber !== null
           ? {
               $or: [
                 { memberNumber: parsedMemberNumber },
@@ -582,51 +647,90 @@ export const listBookingsWithFilters = async ({
 
   const sort: Record<string, SortDirection> = {
     [safeSortBy]: sortDirection,
+    _id: sortDirection,
   };
-
-  const timezone = await resolveSummaryTimezone(tenantId, locationValue);
-  const today = dayjs().tz(timezone);
 
   // Summary counts cover the same filtered records as the table, before
   // pagination. Intersect the extra criteria so date/payment filters remain
   // in force, including when they exclude today's or unpaid bookings.
-  const [bookings, totalCount, todayBookings, awaitingPaymentBookings] =
-    await Promise.all([
-      bookingRepository.find(filter, {
-        sort,
-        skip,
-        limit: pageSize,
-        populate: [
-          {
-            path: "bookingProduct",
-            select: "name label kind type price currency",
+  const [
+    bookings,
+    totalCount,
+    todayBookings,
+    awaitingPaymentBookings,
+    cancelledBookings,
+  ] = await Promise.all([
+    bookingRepository.find(filter, {
+      sort,
+      skip,
+      limit: pageSize,
+      // The directory does not need participant arrays, access credentials,
+      // delivery history or internal payment/hold metadata. Detail/edit
+      // endpoints retain their own richer DTOs.
+      select: [
+        "_id",
+        "customId",
+        "start",
+        "end",
+        "createdAt",
+        "updatedAt",
+        "bookingProduct",
+        "createdBy",
+        "location",
+        "author.name",
+        "author.email",
+        "author.customId",
+        "author.memberNumber",
+        "lecturer",
+        "status",
+        "paymentStatus",
+        "tag",
+        "numberOfGuests",
+        "guestsCount",
+        "guestCount",
+        "totalPrice",
+        "totalAmount",
+        "amount",
+        "paymentAmount",
+        "currency",
+      ],
+      populate: [
+        {
+          path: "bookingProduct",
+          select: "name label kind type price currency",
+          match: { tenant: tenantId },
+        },
+        {
+          path: "createdBy",
+          select: "firstname lastname customId memberNumber email",
+          match: { tenant: tenantId },
+        },
+        {
+          path: "location",
+          select: "name slug code address booking.timezone",
+          match: { tenant: tenantId },
+        },
+      ],
+    }),
+    bookingRepository.count(filter),
+    bookingRepository.count({
+      $and: [
+        filter,
+        {
+          start: {
+            $gte: today.startOf("day").toDate(),
+            $lte: today.endOf("day").toDate(),
           },
-          {
-            path: "createdBy",
-            select: "firstname lastname customId memberNumber email",
-          },
-          {
-            path: "location",
-            select: "name slug code address booking.timezone",
-          },
-        ],
-      }),
-      bookingRepository.count(filter),
-      bookingRepository.count({
-        $and: [
-          filter,
-          {
-            start: {
-              $gte: today.startOf("day").toDate(),
-              $lte: today.endOf("day").toDate(),
-            },
-          },
-        ],
-      }),
-      bookingRepository.count({
-        $and: [filter, { paymentStatus: PAYMENT_STATUS.PENDING_PAYMENT }],
-      }),
-    ]);
+        },
+      ],
+    }),
+    bookingRepository.count({
+      $and: [filter, { paymentStatus: PAYMENT_STATUS.PENDING_PAYMENT }],
+    }),
+    bookingRepository.count({
+      $and: [filter, { status: BOOKING_STATUS.CANCELLED }],
+    }),
+  ]);
 
   return {
     bookings,
@@ -638,6 +742,83 @@ export const listBookingsWithFilters = async ({
       totalBookings: totalCount,
       todayBookings,
       awaitingPaymentBookings,
+      cancelledBookings,
     },
+  };
+};
+
+/** Filter identities only: no staff directory, commerce enrichment or catalog cap. */
+export const listBookingFilterOptions = async ({
+  tenantId,
+  locationId,
+  allowedLocationIds,
+}: ListBookingsArgs) => {
+  if (locationId && !isValidObjectId(locationId))
+    badRequest("Invalid locationId.");
+  const scope: Record<string, unknown> = { tenant: toObjectId(tenantId) };
+  if (locationId) {
+    if (
+      Array.isArray(allowedLocationIds) &&
+      !allowedLocationIds.includes(locationId)
+    ) {
+      return { products: [], lecturers: [] };
+    }
+    scope.location = toObjectId(locationId);
+  } else if (Array.isArray(allowedLocationIds)) {
+    scope.location = { $in: allowedLocationIds.map(toObjectId) };
+  }
+  const [result] = await Booking.aggregate([
+    { $match: scope },
+    { $project: { _id: 0, bookingProduct: 1, lecturer: 1 } },
+    {
+      $facet: {
+        products: [
+          { $match: { bookingProduct: { $type: "objectId" } } },
+          { $group: { _id: "$bookingProduct" } },
+          {
+            $lookup: {
+              from: Product.collection.name,
+              let: { productId: "$_id" },
+              pipeline: [
+                {
+                  $match: {
+                    tenant: toObjectId(tenantId),
+                    $expr: { $eq: ["$_id", "$$productId"] },
+                  },
+                },
+                { $project: { _id: 1, name: 1, label: 1, kind: 1 } },
+              ],
+              as: "product",
+            },
+          },
+          { $unwind: "$product" },
+          { $replaceRoot: { newRoot: "$product" } },
+        ],
+        lecturers: [
+          { $match: { lecturer: { $type: "string" } } },
+          { $group: { _id: "$lecturer" } },
+        ],
+      },
+    },
+  ]);
+  return {
+    products: (result?.products ?? [])
+      .map((product: any) => ({
+        _id: String(product._id),
+        name: String(product.name || product.label || product._id),
+        ...(typeof product.kind === "string" ? { kind: product.kind } : {}),
+      }))
+      .sort((a: { name: string }, b: { name: string }) =>
+        a.name.localeCompare(b.name),
+      ),
+    lecturers: (result?.lecturers ?? [])
+      .map((lecturer: { _id: string }) => ({
+        value: lecturer._id,
+        label: lecturer._id.trim(),
+      }))
+      .filter((lecturer: { label: string }) => lecturer.label)
+      .sort((a: { label: string }, b: { label: string }) =>
+        a.label.localeCompare(b.label),
+      ),
   };
 };

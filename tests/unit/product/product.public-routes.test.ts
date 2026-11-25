@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   findPublishedTenantBySlug: vi.fn(),
   getTenantSubscriptionAccess: vi.fn(),
   listPublicProducts: vi.fn(),
+  listPublicCoursePage: vi.fn(),
   getPublicProduct: vi.fn(),
   listCustomerBookingLocations: vi.fn(),
   listPublicCourseSessions: vi.fn(),
@@ -34,6 +35,7 @@ vi.mock(
 vi.mock("@/modules/product/services/product.service.js", () => ({
   productService: {
     listPublicProducts: mocks.listPublicProducts,
+    listPublicCoursePage: mocks.listPublicCoursePage,
     getPublicProduct: mocks.getPublicProduct,
   },
 }));
@@ -70,6 +72,8 @@ describe("public product catalog routes", () => {
       subscription: {},
       access: { canUseFeatures: true },
     });
+    mocks.listCustomerBookingLocations.mockResolvedValue({ locations: [] });
+    mocks.listPublicCoursePage.mockResolvedValue([]);
     mocks.listPublicProducts.mockResolvedValue({
       products: [],
       totalCount: 0,
@@ -119,6 +123,46 @@ describe("public product catalog routes", () => {
       .get("/tenants/studio-grohovka/products/courses/locations")
       .expect(403);
   });
+
+  const grohova = { id: "507f1f77bcf86cd799439011", slug: "grohova", isPrimary: true };
+  const vaclavska = { id: "507f1f77bcf86cd799439012", slug: "vaclavska", isPrimary: false };
+
+  it.each([
+    ["?location=vaclavska", vaclavska],
+    [`?location=${vaclavska.id}`, vaclavska],
+    ["", grohova],
+  ])("returns the active locations and first page for %s in one request", async (query, selected) => {
+    const locations = [vaclavska, grohova];
+    const products = [{ id: "course", name: "Ceramics" }];
+    mocks.listCustomerBookingLocations.mockResolvedValueOnce({ locations });
+    mocks.listPublicCoursePage.mockResolvedValueOnce(products);
+    const response = await request(app)
+      .get(`/tenants/studio-grohovka/products/courses/overview${query}`).expect(200);
+    expect(mocks.findPublishedTenantBySlug).toHaveBeenCalledWith(tenant.slug, { cache: false });
+    expect(mocks.listPublicCoursePage).toHaveBeenCalledWith(tenant, { locationId: selected.id, page: 1, limit: 100 });
+    expect(response.body).toEqual({ locations, locationId: selected.id, products });
+    expect(response.headers["cache-control"]).toBe("no-store, max-age=0");
+  });
+
+  it("resolves a hexadecimal ID even when another studio uses it as a slug", async () => {
+    mocks.listCustomerBookingLocations.mockResolvedValueOnce({
+      locations: [{ ...grohova, slug: vaclavska.id }, vaclavska],
+    });
+    const response = await request(app).get("/tenants/studio-grohovka/products/courses/overview")
+      .query({ location: vaclavska.id }).expect(200);
+    expect(response.body.locationId).toBe(vaclavska.id);
+  });
+
+  it.each(["", "unknown", "507f1f77bcf86cd799439099"])(
+    "never falls back to another studio for an unavailable location %s", async (reference) => {
+      mocks.listCustomerBookingLocations.mockResolvedValueOnce({ locations: [grohova] });
+      const response = await request(app)
+        .get("/tenants/studio-grohovka/products/courses/overview")
+        .query({ location: reference }).expect(200);
+      expect(response.body).toEqual({ locations: [grohova], locationId: "", products: [] });
+      expect(mocks.listPublicCoursePage).not.toHaveBeenCalled();
+    },
+  );
 
   it("uses only the published slug tenant and ignores a supplied tenant id", async () => {
     const response = await request(app)
@@ -180,11 +224,7 @@ describe("public product catalog routes", () => {
       .get("/tenants/studio-grohovka/products/courses")
       .expect(200);
 
-    expect(mocks.listPublicProducts).toHaveBeenCalledWith({
-      tenantId: tenant._id,
-      coursesOnly: true,
-      respectPublicCourseVisibility: true,
-      locationId: undefined,
+    expect(mocks.listPublicCoursePage).toHaveBeenCalledWith(tenant, {
       search: "",
       page: 1,
       limit: 100,
@@ -229,12 +269,9 @@ describe("public product catalog routes", () => {
       .get("/tenants/studio-grohovka/products/courses")
       .query({ locationId: "507f1f77bcf86cd799439088", search: "wheel" })
       .expect(200);
-    expect(mocks.listPublicProducts).toHaveBeenCalledWith({
-      tenantId: tenant._id,
-      coursesOnly: true,
+    expect(mocks.listPublicCoursePage).toHaveBeenCalledWith(tenant, {
       page: 1,
       limit: 100,
-      respectPublicCourseVisibility: true,
       locationId: "507f1f77bcf86cd799439088",
       search: "wheel",
     });
@@ -243,6 +280,7 @@ describe("public product catalog routes", () => {
   it.each([
     "/products/courses",
     "/products/courses/locations",
+    "/products/courses/overview",
     "/products/507f1f77bcf86cd799439012/sessions",
   ])(
     "allows anonymous %s when both published course pages are enabled",
@@ -275,6 +313,7 @@ describe("public product catalog routes", () => {
       for (const path of [
         "/products/courses",
         "/products/courses/locations",
+        "/products/courses/overview",
         "/products/507f1f77bcf86cd799439012/sessions",
       ]) {
         const response = await request(app)
@@ -284,6 +323,7 @@ describe("public product catalog routes", () => {
         expect(response.headers["cache-control"]).toBe("no-store, max-age=0");
       }
       expect(mocks.listPublicProducts).not.toHaveBeenCalled();
+      expect(mocks.listPublicCoursePage).not.toHaveBeenCalled();
       expect(mocks.listCustomerBookingLocations).not.toHaveBeenCalled();
       expect(mocks.listPublicCourseSessions).not.toHaveBeenCalled();
     },

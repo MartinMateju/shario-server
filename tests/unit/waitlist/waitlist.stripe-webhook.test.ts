@@ -1,3 +1,7 @@
+// Provider refund preflight is exercised with real Mongo in integration tests.
+vi.mock("@/modules/tenant-payments/services/payment-refund-reconciliation.service.js", () => ({
+  reconcileRecordedRefundBeforeOrderFulfillment: vi.fn().mockResolvedValue(undefined),
+}));
 import mongoose from "mongoose";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 

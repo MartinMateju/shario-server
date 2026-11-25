@@ -30,6 +30,29 @@ export const CUSTOMER_PORTAL_PAGE_IDS = Object.freeze([
 
 export type CustomerPortalPageId = (typeof CUSTOMER_PORTAL_PAGE_IDS)[number];
 
+// A fixed upload slot selects one page image. Booking calendars intentionally
+// have no image slot; location-specific courseHero uploads remain independent.
+export const CUSTOMER_PORTAL_PAGE_IMAGE_SLOTS = Object.freeze({
+  coursesHero: "courses",
+  membershipsHero: "memberships",
+  vouchersHero: "vouchers",
+  knowledgeHero: "knowledge",
+  bookingsHero: "bookings",
+  waitingListHero: "waitingList",
+  creditsHero: "credits",
+  accountHero: "account",
+  invoicesHero: "invoices",
+  notificationsHero: "notifications",
+  productsHero: "products",
+} as const);
+
+export const CUSTOMER_PORTAL_PAGE_IMAGE_KEYS = Object.freeze(
+  Object.values(CUSTOMER_PORTAL_PAGE_IMAGE_SLOTS),
+);
+
+export type CustomerPortalPageImageKey =
+  (typeof CUSTOMER_PORTAL_PAGE_IMAGE_KEYS)[number];
+
 export const CUSTOMER_PORTAL_NAVIGATION_KEYS = Object.freeze([
   "bookSession",
   "courses",
@@ -183,9 +206,12 @@ export const PUBLIC_SITE_MEDIA_SLOT = {
   COURSE_HERO: "courseHero",
 } as const;
 
-export const PUBLIC_SITE_MEDIA_SLOTS = Object.freeze(
-  Object.values(PUBLIC_SITE_MEDIA_SLOT),
-);
+export const PUBLIC_SITE_MEDIA_SLOTS = Object.freeze([
+  ...Object.values(PUBLIC_SITE_MEDIA_SLOT),
+  ...(Object.keys(CUSTOMER_PORTAL_PAGE_IMAGE_SLOTS) as Array<
+    keyof typeof CUSTOMER_PORTAL_PAGE_IMAGE_SLOTS
+  >),
+]);
 
 export type PublicSiteMediaSlot = (typeof PUBLIC_SITE_MEDIA_SLOTS)[number];
 

@@ -113,7 +113,7 @@ export const WORKSPACE_NOTIFICATION_STATUSES = Object.freeze(
  * key are still governed by the global `inApp` preference.
  */
 export const WORKSPACE_NOTIFICATION_EVENT_PREFERENCE = Object.freeze({
-  [WORKSPACE_NOTIFICATION_EVENT.BOOKING_CREATED]: "bookingAssigned",
+  [WORKSPACE_NOTIFICATION_EVENT.BOOKING_CREATED]: "bookingCreated",
   [WORKSPACE_NOTIFICATION_EVENT.BOOKING_CANCELLED]: "bookingCancelled",
   [WORKSPACE_NOTIFICATION_EVENT.BOOKING_RESCHEDULED]: "bookingAssigned",
   [WORKSPACE_NOTIFICATION_EVENT.TASK_ASSIGNED]: "taskAssigned",
@@ -122,7 +122,11 @@ export const WORKSPACE_NOTIFICATION_EVENT_PREFERENCE = Object.freeze({
 } as const);
 
 export type WorkspaceNotificationPreferenceKey =
-  "bookingAssigned" | "bookingCancelled" | "taskAssigned" | "inventoryAlerts";
+  | "bookingCreated"
+  | "bookingAssigned"
+  | "bookingCancelled"
+  | "taskAssigned"
+  | "inventoryAlerts";
 
 export const DEFAULT_WORKSPACE_NOTIFICATION_PAGE_SIZE = 20;
 export const MAX_WORKSPACE_NOTIFICATION_PAGE_SIZE = 50;

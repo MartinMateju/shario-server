@@ -16,6 +16,7 @@ import {
 } from "@/shared/http/httpErrors.js";
 import {
   LOCATION_ACCESS_MODE,
+  TENANT_MEMBERSHIP_STATUS,
   WORKSPACE_ROLE,
   type WorkspaceRole,
 } from "../tenant-access.constants.js";
@@ -40,6 +41,7 @@ import {
 import { parseTenantAccessInput } from "../tenant-access.validators.js";
 import type {
   ResolvedWorkspaceAccess,
+  TenantMembershipDocument,
   WorkspaceLocationAccess,
 } from "../tenant-access.types.js";
 import {
@@ -302,6 +304,15 @@ const deliverInvitation = async (
 };
 
 type ActorContext = { tenantId: string; actorUserId: string };
+const matchesRevokedMembership = (
+  invitation: TeamInvitationDocument,
+  membership: TenantMembershipDocument | null,
+) =>
+  invitation.mode === "join" &&
+  membership?.status === TENANT_MEMBERSHIP_STATUS.REVOKED &&
+  String(invitation.membership) === String(membership._id) &&
+  invitation.membershipAccessVersion === membership.accessVersion;
+
 export const createTeamInvitation = async ({
   tenantId,
   actorUserId,
@@ -321,28 +332,42 @@ export const createTeamInvitation = async ({
     const user = await UserModel.findOne({ tenant: tenant._id, email })
       .select("+platformRole +tenantRole")
       .session(session);
+    const membership = user
+      ? await tenantAccessRepository.findMembershipByUser(tenantId, user._id, {
+          session,
+        })
+      : null;
     if (user) {
       assertAccountUsable(user);
       if (
-        (await tenantAccessRepository.findMembershipByUser(tenantId, user._id, {
-          session,
-        })) ||
+        (membership &&
+          membership.status !== TENANT_MEMBERSHIP_STATUS.REVOKED) ||
         user.tenantRole !== "customer"
       ) {
         conflict({
           code: "TENANT_MEMBERSHIP_EXISTS",
           message:
-            "This account already has team access history. Use its team member controls.",
+            "This account already has team access. Update its role using the team member controls.",
         });
       }
     }
+    const pending = await TeamInvitationModel.findOne({
+      tenant: tenant._id,
+      email,
+      status: "pending",
+    }).session(session);
     if (
-      await TeamInvitationModel.exists({
-        tenant: tenant._id,
-        email,
-        status: "pending",
-      }).session(session)
+      pending &&
+      membership?.status === TENANT_MEMBERSHIP_STATUS.REVOKED &&
+      !matchesRevokedMembership(pending, membership)
     ) {
+      // Removal can leave a pending sign-in link or an older join grant.
+      // Retire it under the tenant lock before issuing a fresh re-invitation.
+      pending.status = "revoked";
+      pending.revokedAt = new Date();
+      pending.updatedBy = toId(actorUserId);
+      await pending.save({ session });
+    } else if (pending) {
       conflict({
         code: "TEAM_INVITATION_EXISTS",
         message:
@@ -361,6 +386,8 @@ export const createTeamInvitation = async ({
           tenant: tenant._id,
           email,
           mode: "join",
+          membership: membership?._id ?? null,
+          membershipAccessVersion: membership?.accessVersion ?? null,
           roleKey: input.roleKey,
           customRoleId: grant.customRole,
           locationAccess: grant.locationAccess,
@@ -532,6 +559,19 @@ const mutateInvitation = async ({
       });
       if (current.mode === "sign_in")
         await assertSignInMembership(current, session);
+      if (current.mode === "join" && current.membership) {
+        const membership = await tenantAccessRepository.findMembershipById(
+          tenantId,
+          String(current.membership),
+          { session },
+        );
+        if (!matchesRevokedMembership(current, membership))
+          conflict({
+            code: "TEAM_INVITATION_MEMBERSHIP_CHANGED",
+            message:
+              "This account's team access changed. Create a new invitation or update the existing member.",
+          });
+      }
       if (Date.now() - current.lastAttemptAt.getTime() < 60_000)
         tooManyRequests({
           code: "TEAM_INVITATION_RESEND_TOO_SOON",
@@ -693,11 +733,14 @@ export const acceptTeamInvitation = async (
         user._id,
         { session },
       );
-      if (existing || user.tenantRole !== "customer")
+      const membershipChanged = invitation.membership
+        ? !matchesRevokedMembership(invitation, existing)
+        : Boolean(existing);
+      if (membershipChanged || user.tenantRole !== "customer")
         conflict({
           code: "TENANT_MEMBERSHIP_EXISTS",
           message:
-            "This account's team access changed. Ask the workspace owner for a new sign-in link.",
+            "This account's team access changed. Ask the workspace owner for a new invitation or update the existing member.",
         });
       const membership = await addExistingTenantUserToTeam({
         tenantId,

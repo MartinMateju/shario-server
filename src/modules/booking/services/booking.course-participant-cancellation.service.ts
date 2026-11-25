@@ -1,3 +1,4 @@
+import { assertOrdersHaveNoProviderRefund } from "@/modules/tenant-payments/services/payment-refund-reconciliation.service.js";
 import mongoose, { type ClientSession } from "mongoose";
 
 import { moneyCreditService } from "@/modules/money-credit/services/money-credit.service.js";
@@ -19,6 +20,7 @@ import {
 
 import Booking from "../booking.model.js";
 import { BookingPaymentRefund } from "../booking-payment-refund.model.js";
+import { recordBookingCancellation } from "../booking-cancellation-event.model.js";
 import {
   hasVoucherPayment,
   refundBookingOriginalPaymentInSession,
@@ -103,7 +105,7 @@ export const cancelPaidCourseParticipants = async ({
       status: { $nin: ["cancelled", "canceled"] } as any,
       start: { $gt: now },
     })
-      .select("_id numberOfGuests participants orders start attendanceManaged")
+      .select("_id location numberOfGuests participants orders start attendanceManaged")
       .session(mongoSession)
       .exec();
     if (!courseSession) {
@@ -166,6 +168,8 @@ export const cancelPaidCourseParticipants = async ({
           : null,
       };
     }
+
+    await assertOrdersHaveNoProviderRefund(tenantId, [orderId], mongoSession);
 
     const participants = (courseSession.participants ?? []).filter(
       (participant: any) => String(participant.order ?? "") === orderId,
@@ -280,6 +284,15 @@ export const cancelPaidCourseParticipants = async ({
       refundedAt: now,
     });
     await order.save({ session: mongoSession });
+    await recordBookingCancellation({
+      // Current operation cancels all seats from this paid order. The saved
+      // entry ordinal also distinguishes any future additional operation.
+      operationId: `course:${orderId}:${sessionId}:${order.courseCancellations.length - 1}`,
+      tenantId, locationId: String(courseSession.location), bookingId: sessionId,
+      customerId: String(order.createdBy), orderId, actorId: actorUserId,
+      actorType: "staff", source: "course_participant", occurredAt: now,
+      seats: purchasedQuantity,
+    }, mongoSession);
 
     lifecycleEmail = await recordCourseParticipantCancellationEmailInSession(
       {

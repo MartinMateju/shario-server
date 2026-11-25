@@ -7,6 +7,7 @@ import {
   createAccessCodeNotificationRepository,
 } from "@/modules/access-codes/access-code.repository.js";
 import OrderModel from "@/modules/order/order.model.js";
+import { isCancellableOpenStudioCardOrder } from "@/modules/checkout/checkout.cancellation-policy.js";
 import { ORDER_STATUS } from "@/modules/order/order.constants.js";
 import { WORKSPACE_PERMISSION } from "@/modules/tenant-access/tenant-access.permissions.js";
 import { emitWorkspaceNotificationEvent } from "@/modules/workspace-notifications/workspace-notification.events.js";
@@ -161,6 +162,57 @@ const customerPaidStudioBookingIds = async ({
   );
 };
 
+// Expose only a verified, owned pending checkout reference. Booking.orders may
+// also contain paid extensions or another purchase, so it is not a safe source
+// for a customer cancellation action.
+const customerPendingCheckoutOrderIds = async ({
+  tenantId,
+  userId,
+  bookings,
+  paidStudioBookingIds,
+}: {
+  tenantId: string;
+  userId: string;
+  bookings: any[];
+  paidStudioBookingIds: Set<string>;
+}): Promise<Map<string, string>> => {
+  const bookingIds = bookings
+    .filter(
+      (booking) =>
+        booking.paymentStatus === PAYMENT_STATUS.PENDING_PAYMENT &&
+        (OPEN_STUDIO_BOOKING_TAGS as readonly string[]).includes(String(booking.tag)) &&
+        booking.status !== BOOKING_STATUS.CANCELLED &&
+        !paidStudioBookingIds.has(toId(booking)),
+    )
+    .map(toId);
+  if (!bookingIds.length) return new Map();
+
+  const pendingOrders = await OrderModel.find({
+    tenant: tenantId,
+    createdBy: userId,
+    isPaid: false,
+    status: ORDER_STATUS.PENDING,
+    workshopBookings: { $in: bookingIds },
+  })
+    .lean()
+    .exec();
+  const result = new Map<string, string>();
+  const ambiguous = new Set<string>();
+  const visibleIds = new Set(bookingIds);
+  for (const order of pendingOrders) {
+    if (!isCancellableOpenStudioCardOrder(order)) continue;
+    for (const id of (order.workshopBookings || []).map(toId)) {
+      if (!visibleIds.has(id)) continue;
+      if (result.has(id)) ambiguous.add(id);
+      else result.set(id, toId(order));
+    }
+  }
+  // Multiple pending purchases for one booking need reconciliation, not an
+  // arbitrary customer-facing cancellation target.
+  for (const id of ambiguous) result.delete(id);
+  return result;
+};
+
 const bookingPopulate = [
   {
     path: "bookingProduct",
@@ -290,12 +342,15 @@ export const buildCustomerRescheduleRange = ({
   currentEnd,
   location,
   now = new Date(),
+  allowPast = false,
 }: {
   requestedStart: Date;
   currentStart: Date;
   currentEnd: Date;
   location: RescheduleLocation;
   now?: Date;
+  // Only the authorized staff editor may opt out of the customer time rule.
+  allowPast?: boolean;
 }) => {
   const start = new Date(requestedStart);
   const originalStart = new Date(currentStart);
@@ -314,7 +369,7 @@ export const buildCustomerRescheduleRange = ({
     });
   }
 
-  if (start.getTime() <= now.getTime()) {
+  if (!allowPast && start.getTime() <= now.getTime()) {
     conflict({
       message: "The booking can only be moved to a future time.",
       code: "CUSTOMER_BOOKING_RESCHEDULE_IN_PAST",
@@ -614,10 +669,16 @@ const listCustomerBookings = async ({
       expiresAt.getTime() > bookingEnd,
     );
   };
+  const pendingCheckoutOrderIds = await customerPendingCheckoutOrderIds({
+    tenantId,
+    userId,
+    bookings,
+    paidStudioBookingIds,
+  });
 
   return {
-    bookings: bookings.map((booking) =>
-      serializeCustomerBooking(
+    bookings: bookings.map((booking) => ({
+      ...serializeCustomerBooking(
         booking,
         quantities.get(toId(booking)),
         hasAccessCodeForBooking(booking),
@@ -625,7 +686,8 @@ const listCustomerBookings = async ({
         modificationLockedBookingIds.has(toId(booking)),
         { now, hasPaidOrder: paidStudioBookingIds.has(toId(booking)) },
       ),
-    ),
+      pendingCheckoutOrderId: pendingCheckoutOrderIds.get(toId(booking)) ?? null,
+    })),
     totalCount,
     currentPage: normalizedPage,
     pageSize,
@@ -727,19 +789,30 @@ export const getMyBooking = async ({
     });
   const accessCodeExpiresAt = accessCodeValidity.get(toId(booking.location));
   const bookingEnd = new Date(booking.end).getTime();
+  const pendingCheckoutOrderIds = isOwnedOpenStudio
+    ? await customerPendingCheckoutOrderIds({
+        tenantId,
+        userId,
+        bookings: [booking],
+        paidStudioBookingIds,
+      })
+    : new Map<string, string>();
 
-  const customerBooking = serializeCustomerBooking(
-    booking,
-    courseQuantity,
-    Boolean(
-      accessCodeExpiresAt &&
-      Number.isFinite(bookingEnd) &&
-      accessCodeExpiresAt.getTime() > bookingEnd,
+  const customerBooking = {
+    ...serializeCustomerBooking(
+      booking,
+      courseQuantity,
+      Boolean(
+        accessCodeExpiresAt &&
+        Number.isFinite(bookingEnd) &&
+        accessCodeExpiresAt.getTime() > bookingEnd,
+      ),
+      accessCodeDelivered,
+      accessCodeModificationLocked,
+      { hasPaidOrder: paidStudioBookingIds.has(bookingId) },
     ),
-    accessCodeDelivered,
-    accessCodeModificationLocked,
-    { hasPaidOrder: paidStudioBookingIds.has(bookingId) },
-  );
+    pendingCheckoutOrderId: pendingCheckoutOrderIds.get(bookingId) ?? null,
+  };
   // A Class session is shared by customers; expose refunds only on an owned
   // Open Studio booking, never another participant's purchase information.
   if (isOwnedOpenStudio && booking.status === BOOKING_STATUS.CANCELLED) {

@@ -6,10 +6,7 @@ import {
   deterministicInsights,
 } from "@/modules/reports/reports.service.js";
 
-import {
-  AI_FEATURE,
-  AI_PROMPT_VERSION,
-} from "../ai.constants.js";
+import { AI_FEATURE, AI_PROMPT_VERSION } from "../ai.constants.js";
 import {
   aiResponseLanguageInstruction,
   resolveAiLocale,
@@ -29,8 +26,9 @@ type ReportBriefingInput = ReportQuery & {
 
 const normalizeLocale = (value: unknown): string => resolveAiLocale(value);
 
-const unique = (values: string[]): string[] =>
-  [...new Set(values.map((value) => value.trim()).filter(Boolean))];
+const unique = (values: string[]): string[] => [
+  ...new Set(values.map((value) => value.trim()).filter(Boolean)),
+];
 
 const reportLimitations = (overview: any): string[] =>
   unique([
@@ -97,11 +95,8 @@ const withoutVolatileReportTimestamps = (value: unknown): unknown => {
   if (value && typeof value === "object") {
     return Object.fromEntries(
       Object.entries(value)
-        .filter(([key]) => key !== "generatedAt" && key !== "asOf")
-        .map(([key, entry]) => [
-          key,
-          withoutVolatileReportTimestamps(entry),
-        ]),
+        .filter(([key]) => !["generatedAt", "asOf", "cashAsOf"].includes(key))
+        .map(([key, entry]) => [key, withoutVolatileReportTimestamps(entry)]),
     );
   }
   return value;
@@ -118,6 +113,16 @@ export const isGroundedReportBriefing = (
     factObject?.metadata?.period?.to,
     factObject?.metadata?.comparisonPeriod?.from,
     factObject?.metadata?.comparisonPeriod?.to,
+    factObject?.metadata?.activeCustomerPeriod?.from,
+    factObject?.metadata?.activeCustomerPeriod?.to,
+    factObject?.metadata?.activeCustomerComparisonPeriod?.from,
+    factObject?.metadata?.activeCustomerComparisonPeriod?.to,
+    factObject?.sales?.bestMonth?.month,
+    ...(factObject?.sales?.monthlyRanking ?? []).flatMap((month: any) => [
+      month.month,
+      month.periodStart,
+      month.periodEnd,
+    ]),
   ]) {
     if (typeof dateValue === "string") {
       for (const token of numericTokens(dateValue)) allowed.add(token);
@@ -138,7 +143,7 @@ export const isGroundedReportBriefing = (
   );
 };
 
-export const REPORT_BRIEFING_CONTRACT_VERSION = "reports-overview-v1";
+export const REPORT_BRIEFING_CONTRACT_VERSION = "reports-recorded-cash-v2";
 
 export const buildReportBriefingSignature = (input: {
   tenantId: string;
@@ -223,7 +228,10 @@ export const generateReportBriefing = async (
     },
     feature: AI_FEATURE.REPORT_INSIGHTS,
     promptVersion: AI_PROMPT_VERSION.REPORT_INSIGHTS,
-    idempotencyKey: `report-insights:${context.userId}:${signature}`.slice(0, 300),
+    idempotencyKey: `report-insights:${context.userId}:${signature}`.slice(
+      0,
+      300,
+    ),
     schema: reportBriefingProviderOutputSchema,
     schemaName: "studio_report_briefing",
     maxOutputTokens: 1_800,
@@ -235,6 +243,10 @@ export const generateReportBriefing = async (
       "Copy numbers exactly as supplied, without thousands separators.",
       "Never infer a cause, correlation, forecast, refund, no-show, attendance, or unavailable value.",
       "A null value means unavailable, never zero.",
+      "Respect metadata.moneyBasis and refundBasis: recorded cash means payments received in the selected payment-date period, less their recorded successful refunds as of cashAsOf. Later refunds can change historical results.",
+      "Recorded cash is not profit, tax-exclusive sales, or the face value of redeemed credit or membership benefits. Never describe it as profit.",
+      "Monetary fields ending in Minor and summary.netSales use currency minor units. Do not label raw minor-unit numbers as major-unit currency totals or invent a conversion; prefer supplied percentage changes.",
+      "A best month exists only when sales.bestMonth is supplied. Do not rank partial months, invent attendance from bookings, or infer missing cancellation history.",
       "Do not identify customers, staff, or other people.",
       "Explicitly disclose incomplete coverage and data limitations.",
       "Recommendations must be reversible suggestions grounded in a reported metric, not autonomous actions.",

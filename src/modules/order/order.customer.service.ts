@@ -1,3 +1,4 @@
+import { serializeRefundSummary } from "@/modules/tenant-payments/payment-refund-summary.js";
 import mongoose from "mongoose";
 
 import { accessCodeRepository } from "@/modules/access-codes/access-code.repository.js";
@@ -41,7 +42,7 @@ export const getMyOrderConfirmation = async ({
     createdBy: userId,
   })
     .select(
-      "_id status currency grossAmountMinor expectedAmountMinor paidAmountMinor isPaid paidAt lineItems paymentAllocations appliedDiscount workshopBookings courseBookings createdAt",
+      "_id status currency grossAmountMinor expectedAmountMinor paidAmountMinor isPaid paidAt lineItems paymentAllocations appliedDiscount workshopBookings courseBookings createdAt refund",
     )
     .lean()
     .exec();
@@ -98,7 +99,9 @@ export const getMyOrderConfirmation = async ({
     status,
     isPaid: order.isPaid === true,
     terminal: status !== "pending_order",
-    processing: status === "pending_order" && order.isPaid === true,
+    processing: status === "pending_order" && order.isPaid === true && !order.refund,
+    refund: serializeRefundSummary(order.refund),
+    refundReviewRequired: status === "pending_order" && Boolean(order.refund),
     createdAt: order.createdAt,
     paidAt: order.paidAt,
     currency: order.currency,

@@ -42,6 +42,8 @@ import {
 } from "./ai.controller.js";
 import {
   publicAiLookupLimiter,
+  customerAiDailyLimiter,
+  customerAiMessageLimiter,
   publicAiMessageLimiter,
   workspaceAiBriefingLimiter,
   workspaceAiMessageLimiter,
@@ -84,6 +86,8 @@ customerAiRouter.use(verifyJWT, requireCustomerSession);
 customerAiRouter.get("/concierge/config", customerConciergeConfig);
 customerAiRouter.post(
   "/concierge",
+  customerAiMessageLimiter,
+  customerAiDailyLimiter,
   loadAuthenticatedTenant,
   knowledgeAwareCustomerAssistant,
   customerConcierge,

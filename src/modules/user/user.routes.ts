@@ -5,9 +5,15 @@ import { verifyJWT } from "@/modules/auth/middleware/verifyJWT.js";
 import { requirePermission } from "@/modules/tenant-access/tenant-access.middleware.js";
 import { WORKSPACE_PERMISSION } from "@/modules/tenant-access/tenant-access.permissions.js";
 import { getCustomerBookingHistory } from "@/modules/booking/controllers/booking.read.controller.js";
+import {
+  readCustomerDirectory,
+  readCustomerDirectorySummary,
+  downloadCustomerDirectory,
+} from "./controllers/user.directory.controller.js";
 
 import {
   getCustomerById,
+  getCustomerSummary,
   getAllUsers,
   getUserbyCustomId,
   getUsersWithFilters,
@@ -37,7 +43,11 @@ router
   .delete(canManageUsers, deleteUser);
 
 router.post("/filter", canViewUsers, getUsersWithFilters);
+router.get("/directory/summary", canViewUsers, readCustomerDirectorySummary);
+router.post("/directory/export", canViewUsers, downloadCustomerDirectory);
+router.get("/directory", canViewUsers, readCustomerDirectory);
 router.get("/lookup", canViewUsers, lookupUser);
+router.get("/summary", canViewUsers, getCustomerSummary);
 router.patch("/pass", requireWorkspaceSession, updateUserPassword);
 
 router.get(

@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import {
   assertNativeInvoicingEnabled,
   isNativeInvoicingEnabled,
@@ -30,6 +30,10 @@ import { TENANT_MODULE } from "@/modules/tenants/tenant.constants.js";
 import { publishTenantPublicSiteDraft } from "@/modules/tenants/settings/tenant-settings.service.js";
 
 import { publicTenantCacheKey } from "./setup-publication.service.js";
+import {
+  legacyPracticeFingerprint,
+  practiceFingerprint,
+} from "./setup-practice-fingerprint.js";
 import UserModel from "@/modules/user/user.model.js";
 import { conflict, forbidden, notFound } from "@/shared/http/httpErrors.js";
 
@@ -153,31 +157,42 @@ const normalizePractice = (practice: any, fingerprint: string) => {
   };
 };
 
-const fingerprintFor = ({
-  product,
-  location,
+const upgradeCurrentPracticeEvidence = async ({
+  tenantId,
+  state,
+  legacyFingerprint,
+  fingerprint,
 }: {
-  product: any;
-  location: any;
+  tenantId: string;
+  state: any;
+  legacyFingerprint: string;
+  fingerprint: string;
 }) => {
-  if (!product || !location) return "";
+  if (!state || !legacyFingerprint) return state;
+  let currentState = state;
+  for (const field of ["practiceConfirmation", "practice"] as const) {
+    const evidence = currentState?.[field];
+    if (evidence?.readinessFingerprint !== legacyFingerprint) continue;
 
-  return createHash("sha256")
-    .update(
-      JSON.stringify({
-        productId: String(product._id),
-        productUpdatedAt: product.updatedAt,
-        productActive: product.isActive,
-        price: product.price,
-        currency: product.currency,
-        capacity: product.maxNumberOfParticipants,
-        locationId: String(location._id),
-        locationUpdatedAt: location.updatedAt,
-        locationActive: location.isActive,
-        bookingEnabled: location.booking?.enabled,
-      }),
-    )
-    .digest("hex");
+    // Upgrade only evidence that still matches the old configuration exactly.
+    // Preserve who/when confirmed and every simulated artifact. The comparison
+    // prevents a concurrent clear or new confirmation from being overwritten.
+    const upgraded = await SetupCenterStateModel.findOneAndUpdate(
+      {
+        tenant: tenantId,
+        [`${field}.readinessFingerprint`]: legacyFingerprint,
+        ...(field === "practice"
+          ? { "practice.runId": evidence.runId }
+          : { "practiceConfirmation.confirmedAt": evidence.confirmedAt }),
+      },
+      { $set: { [`${field}.readinessFingerprint`]: fingerprint } },
+      { returnDocument: "after", runValidators: true },
+    );
+    currentState =
+      upgraded ??
+      (await SetupCenterStateModel.findOne({ tenant: tenantId }).lean());
+  }
+  return currentState;
 };
 
 const isProductBookable = (product: any): boolean =>
@@ -361,15 +376,15 @@ export const buildSetupCenterSnapshot = async ({
       )
       .lean(),
     LocationModel.find({ tenant: tenantId, isActive: true })
-      .select("_id name isActive isPrimary booking updatedAt")
-      .sort({ isPrimary: -1, createdAt: 1 })
+      .select("_id name isActive isPrimary booking openingHours updatedAt")
+      .sort({ isPrimary: -1, createdAt: 1, _id: 1 })
       .lean(),
     LocationModel.countDocuments({ tenant: tenantId }),
     Product.find({ tenant: tenantId })
       .select(
-        "_id name type kind kindContractVersion bookingMode price currency maxNumberOfParticipants studioFlow isActive updatedAt",
+        "_id name type kind kindContractVersion bookingMode openStudioPolicy location price extraCharge currency maxNumberOfParticipants studioFlow isActive updatedAt",
       )
-      .sort({ createdAt: 1 })
+      .sort({ createdAt: 1, _id: 1 })
       .lean(),
     TenantPaymentAccountModel.findOne({ tenant: tenantId }).lean(),
     isManagedSenderReady(tenantId),
@@ -496,6 +511,7 @@ export const buildSetupCenterSnapshot = async ({
           status: { $ne: "cancelled" },
         })
           .select("bookingProduct location")
+          .sort({ bookingProduct: 1, location: 1, _id: 1 })
           .lean()
       : null;
   const scheduledProductId = String(
@@ -559,19 +575,26 @@ export const buildSetupCenterSnapshot = async ({
     (isTimedOffer ||
       (upcomingSchedule && scheduledProduct && scheduledLocation)),
   );
-  const readinessFingerprint = fingerprintFor({
+  const fingerprintConfiguration = {
     product: bookableProduct,
     location: activeLocation,
+  };
+  const readinessFingerprint = practiceFingerprint(fingerprintConfiguration);
+  const practiceState = await upgradeCurrentPracticeEvidence({
+    tenantId,
+    state,
+    legacyFingerprint: legacyPracticeFingerprint(fingerprintConfiguration),
+    fingerprint: readinessFingerprint,
   });
   const practice = {
-    ...normalizePractice(state?.practice, readinessFingerprint),
-    manualConfirmation: state?.practiceConfirmation
+    ...normalizePractice(practiceState?.practice, readinessFingerprint),
+    manualConfirmation: practiceState?.practiceConfirmation
       ? {
-          confirmedAt: state.practiceConfirmation.confirmedAt,
-          confirmedBy: String(state.practiceConfirmation.confirmedBy),
+          confirmedAt: practiceState.practiceConfirmation.confirmedAt,
+          confirmedBy: String(practiceState.practiceConfirmation.confirmedBy),
           current:
             Boolean(readinessFingerprint) &&
-            state.practiceConfirmation.readinessFingerprint ===
+            practiceState.practiceConfirmation.readinessFingerprint ===
               readinessFingerprint,
         }
       : null,

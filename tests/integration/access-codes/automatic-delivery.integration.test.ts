@@ -40,6 +40,7 @@ import {
 } from "@/modules/access-codes/access-code.model.js";
 import { encryptAccessCode } from "@/modules/access-codes/access-code.crypto.js";
 import { sendAccessCodeNotifications } from "@/modules/access-codes/services/access-code-notification.service.js";
+import { saveDoorAccessEmailTemplate } from "@/modules/access-codes/services/door-access-email-template.service.js";
 import {
   getDoorAccessAutomation,
   updateDoorAccessAutomation,
@@ -151,6 +152,54 @@ beforeEach(async () => {
 });
 
 describe("automatic reusable door-code delivery", () => {
+  it("uses only the booking location's saved message and keeps the normal send guard and delivery state", async () => {
+    const otherLocation = new Types.ObjectId();
+    await Location.collection.insertOne({
+      _id: otherLocation,
+      tenant,
+      name: "Other location",
+      isActive: true,
+    } as any);
+    const custom = (label: string) => ({
+      defaultLocale: "en",
+      contentVariants: {
+        en: {
+          subject: label,
+          format: "plain",
+          body: `${label}: {{entryCode}} at {{studioName}} / {{bookingTime}}`,
+        },
+      },
+    });
+    await saveDoorAccessEmailTemplate(
+      String(tenant),
+      String(otherLocation),
+      custom("Wrong location instructions"),
+    );
+    await saveDoorAccessEmailTemplate(
+      String(tenant),
+      String(location),
+      custom("Use the side entrance"),
+    );
+    const result = await sendAccessCodeNotifications();
+    expect(result.sent).toBe(1);
+    expect(transport.send).toHaveBeenCalledTimes(1);
+    expect(transport.send.mock.calls[0][0]).toMatchObject({
+      subject: "Use the side entrance",
+      text: expect.stringContaining(
+        "Use the side entrance: test-7391 at Test studio",
+      ),
+      accessCodeBookingId: String(booking),
+      beforeSend: expect.any(Function),
+    });
+    expect(JSON.stringify(transport.send.mock.calls)).not.toContain(
+      "Wrong location instructions",
+    );
+    expect(
+      (await AccessCodeNotification.findOne({ booking }).lean())?.status,
+    ).toBe("sent");
+    expect((await sendAccessCodeNotifications()).sent).toBe(0);
+  });
+
   it("configures a scoped built-in automation without exposing codes or enabling ineligible plans", async () => {
     expect(
       (await getDoorAccessAutomation(String(tenant), [])).locations,

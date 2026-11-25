@@ -134,6 +134,7 @@ const access = (
     },
     firstBookingCelebrationSeen: false,
     notifications: {
+      bookingCreated: false,
       bookingAssigned: true,
       bookingCancelled: true,
       taskAssigned: true,
@@ -363,6 +364,7 @@ describe("dashboard overview service", () => {
     });
     expect(result.today).toEqual({
       available: true,
+      nextBooking: expect.objectContaining({ id: BOOKING_ID }),
       schedule: [
         expect.objectContaining({
           id: BOOKING_ID,
@@ -666,7 +668,11 @@ describe("dashboard overview service", () => {
     expect(mocks.bookingCount).not.toHaveBeenCalled();
     expect(mocks.potteryAggregate).not.toHaveBeenCalled();
     expect(mocks.firingCount).not.toHaveBeenCalled();
-    expect(result.today).toEqual({ available: false, schedule: null });
+    expect(result.today).toEqual({
+      available: false,
+      schedule: null,
+      nextBooking: null,
+    });
     expect(result.flow.every((stage) => stage.value === null)).toBe(true);
     expect(result.flow.every((stage) => stage.available === false)).toBe(true);
     expect(
@@ -791,7 +797,7 @@ describe("dashboard overview service", () => {
       now: new Date("2026-07-30T07:45:00.000Z"),
     });
 
-    expect(mocks.bookingFind).toHaveBeenCalledOnce();
+    expect(mocks.bookingFind).toHaveBeenCalledTimes(2);
     expect(mocks.potteryAggregate).not.toHaveBeenCalled();
     expect(result.today.available).toBe(true);
     expect(result.businessPulse.revenue.available).toBe(true);
@@ -858,7 +864,11 @@ describe("dashboard overview service", () => {
     expect(mocks.reportOverview).not.toHaveBeenCalled();
     expect(mocks.bookingFind).not.toHaveBeenCalled();
     expect(mocks.potteryAggregate).not.toHaveBeenCalled();
-    expect(result.today).toEqual({ available: false, schedule: null });
+    expect(result.today).toEqual({
+      available: false,
+      schedule: null,
+      nextBooking: null,
+    });
     expect(result.businessPulse.bookings).toEqual({
       available: false,
       value: null,
@@ -885,7 +895,11 @@ describe("dashboard overview service", () => {
       now: new Date("2026-07-30T07:45:00.000Z"),
     });
 
-    expect(result.today).toEqual({ available: false, schedule: null });
+    expect(result.today).toEqual({
+      available: false,
+      schedule: null,
+      nextBooking: null,
+    });
     expect(result.flow.find((stage) => stage.key === "arriving")).toMatchObject(
       { available: false, value: null, unit: "people" },
     );

@@ -1,4 +1,5 @@
 import type { Request, Response } from "express";
+import { resolveAuthRequestContext } from "@/modules/auth/auth-first-party-proxy.js";
 
 import { asyncHandler } from "../../../shared/http/asyncHandler.js";
 import { requireTenantId } from "@/modules/tenants/tenant.utils.js";
@@ -36,6 +37,7 @@ export const updateUser = asyncHandler(async (req: Request, res: Response) => {
   const result = await updateUserService({
     tenantId,
     input: req.body,
+    requestedOrigin: req.get("origin") || undefined,
   });
 
   res.json(result);
@@ -43,6 +45,7 @@ export const updateUser = asyncHandler(async (req: Request, res: Response) => {
 
 export const updateUserPassword = asyncHandler(
   async (req: Request, res: Response) => {
+    const context = await resolveAuthRequestContext(req);
     const tenantId = requireTenantId(req);
 
     const result = await updateUserPasswordService({
@@ -53,7 +56,9 @@ export const updateUserPassword = asyncHandler(
       },
     });
 
-    for (const options of getRefreshCookieCleanupOptions(req.get("origin"))) {
+    for (const options of getRefreshCookieCleanupOptions(context.origin, {
+      firstPartyProxy: context.firstPartyProxy,
+    })) {
       res.clearCookie(REFRESH_TOKEN_COOKIE_NAME, options);
       res.clearCookie(CUSTOMER_REFRESH_TOKEN_COOKIE_NAME, options);
     }

@@ -1,3 +1,5 @@
+import { applyPaymentConfirmed } from "@/modules/membership/services/membership-webhook.service.js";
+import { PaymentRefundReconciliation } from "@/modules/tenant-payments/payment-refund-reconciliation.model.js";
 import express from "express";
 import jwt from "jsonwebtoken";
 import mongoose from "mongoose";
@@ -266,6 +268,52 @@ describe("recurring membership through authenticated HTTP and signed Connect web
       }),
     );
     await membershipPlanService.publish(String(ids.tenant), plan.id);
+  });
+
+  it("does not grant an invoice's benefits when its Dashboard refund arrived before membership association", async () => {
+    await checkout();
+    const invoice = stripe.period(jan, feb);
+    (invoice as any).payment_intent = "pi_refunded_before_membership";
+    await PaymentRefundReconciliation.create({ _id: "early-membership-refund", tenant: ids.tenant, connectedAccountId: TEST_ACCOUNT,
+      paymentIntentId: "pi_refunded_before_membership", livemode: false, stripeInvoiceId: invoice.id, reviewRequired: true, reviewReason: "payment_binding_missing" });
+    stripe.checkout.status = "complete";
+    stripe.checkout.payment_status = "paid";
+    expect((await hook("checkout.session.completed", stripe.checkout)).status).toBe(200);
+    expect(await Ledger.countDocuments()).toBe(0);
+    expect(await Balance.countDocuments()).toBe(0);
+    expect((await Membership.findOne({ tenant: ids.tenant }).lean())?.status).toBe("pending");
+    expect(await Notification.countDocuments({ type: "activated" })).toBe(0);
+    const status = await request(app).get(`/memberships/checkout/${stripe.checkout.id}`).auth(token(), { type: "bearer" }).expect(200);
+    expect(status.body).toMatchObject({ refund: null, refundReviewRequired: true, currency: "CZK" });
+    await request(app).get(`/memberships/checkout/${stripe.checkout.id}`).auth(token(ids.other), { type: "bearer" }).expect(404);
+  });
+
+  it("materializes the invoice again after an actual Mongo transaction retry", async () => {
+    await checkout();
+    const invoice = stripe.period(jan, feb);
+    const membership = await Membership.findOne({ tenant: ids.tenant }).select("+stripe").exec();
+    const originalSave = Membership.prototype.save;
+    let failedAttempt = false;
+    const save = vi.spyOn(Membership.prototype, "save").mockImplementation(async function (this: any, options: any) {
+      if (!failedAttempt && options?.session) {
+        failedAttempt = true;
+        expect(await Invoice.countDocuments({ tenant: ids.tenant }).session(options.session)).toBe(1);
+        const conflict = new mongoose.mongo.MongoServerError({ message: "Injected transaction write conflict", code: 112 });
+        conflict.addErrorLabel("TransientTransactionError");
+        throw conflict;
+      }
+      return originalSave.call(this, options);
+    } as any);
+    try {
+      await applyPaymentConfirmed({ id: "reconcile:subscription:retry", type: "invoice.paid", created: Math.floor(Date.now() / 1000),
+        data: { object: { subscription: stripe.subscription.id, customer: stripe.subscription.customer } } } as any,
+      membership, TEST_ACCOUNT);
+    } finally { save.mockRestore(); }
+    expect(failedAttempt).toBe(true);
+    expect(await Invoice.countDocuments({ tenant: ids.tenant })).toBe(1);
+    expect((await Invoice.findOne({ tenant: ids.tenant }).select("+stripeInvoiceId").lean())?.stripeInvoiceId).toBe(invoice.id);
+    expect((await Membership.findOne({ tenant: ids.tenant }).lean())?.status).toBe("active");
+    expect(await Ledger.countDocuments({ type: "grant" })).toBe(1);
   });
 
   it.each([

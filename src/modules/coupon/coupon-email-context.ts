@@ -132,7 +132,7 @@ export const resolveCouponEmailContext = async (
 
   const [tenant, savedLayout, memberships, sender] = await Promise.all([
     TenantModel.findOne({ _id: tenantId })
-      .select("name slug settings publicSite publicSiteEditor.published")
+      .select("name slug plan planVersion domains settings publicSite publicSiteEditor.published")
       .lean()
       .exec(),
     EmailTemplate.findOne({
@@ -209,10 +209,10 @@ export const resolveCouponEmailContext = async (
 
   return {
     tenantId,
-    // Long-lived purchase links use today's canonical tenant subdomain, never
+    // Long-lived purchase links use today's canonical tenant origin, never
     // a saved custom domain that may since have been removed or reassigned.
     commerceOrigin: typeof tenant.slug === "string" && /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(tenant.slug)
-      ? resolveTenantCommerceOrigin({ tenant: { slug: tenant.slug } }) : undefined,
+      ? resolveTenantCommerceOrigin({ tenant }) : undefined,
     brandName: String(branding?.displayName || tenant.name || "shario.io")
       .replace(/[\r\n]+/g, " ").trim() || "shario.io",
     locale: resolveCommunicationContentLocale(

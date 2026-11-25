@@ -139,7 +139,7 @@ describe("report AI grounding", () => {
     );
 
     expect(briefing.headline).toBe("Přehled výsledků studia");
-    expect(briefing.highlights.join(" ")).toContain("Tržby");
+    expect(briefing.highlights.join(" ")).toContain("Přijaté platby");
     expect(briefing.highlights.join(" ")).not.toContain("stale English");
   });
 });

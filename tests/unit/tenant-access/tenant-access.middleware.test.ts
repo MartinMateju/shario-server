@@ -41,6 +41,7 @@ const access = {
     defaultLandingPage: "/app",
     contextualGuides: {},
     notifications: {
+      bookingCreated: false,
       bookingAssigned: true,
       bookingCancelled: true,
       taskAssigned: true,

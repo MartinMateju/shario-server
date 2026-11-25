@@ -164,6 +164,25 @@ describe("guest course checkout: real persistence, canonical seats and protected
     await expect(getProtectedGuestCourseOrderStatus(input)).resolves.toMatchObject({ isPaid: false });
   });
 
+  it("returns refund-review status only with the guest's original token and tenant", async () => {
+    const result = await checkout(body(), randomUUID());
+    await Order.collection.updateOne({ _id: new mongoose.Types.ObjectId(result.orderId) }, { $set: {
+      isPaid: true, refund: { reconciliationId: "a".repeat(64), status: "full", succeededAmountMinor: 25000, pendingAmountMinor: 0, failedAmountMinor: 0,
+        reviewRequired: true, reviewReason: "benefit_review_required", snapshotVersion: "b".repeat(64), updatedAt: new Date(), staffNote: "private evidence" },
+    } });
+    const input = { tenantId: String(tenantId), orderId: result.orderId, accessToken: result.accessToken };
+    const status = await getProtectedGuestCourseOrderStatus(input);
+    expect(status).toMatchObject({ processing: false, refund: { reviewRequired: true, status: "full", succeededAmountMinor: 25000 } });
+    expect(JSON.stringify(status)).not.toContain("private evidence");
+    await Order.updateOne({ _id: result.orderId }, { $set: { "refund.status": "failed", "refund.succeededAmountMinor": 0, "refund.reviewRequired": false } });
+    await expect(getProtectedGuestCourseOrderStatus(input)).resolves.toMatchObject({ refundReviewRequired: true });
+    await Order.updateOne({ _id: result.orderId }, { $set: { status: "processed_order" } });
+    await expect(getProtectedGuestCourseOrderStatus(input)).resolves.toMatchObject({ refundReviewRequired: false });
+    for (const invalid of [{ ...input, accessToken: undefined }, { ...input, tenantId: String(id()) }])
+      await expect(getProtectedGuestCourseOrderStatus(invalid)).rejects.toMatchObject({ statusCode: 404 });
+    await expect(getPublicGuestCourseOrderStatus(input)).resolves.toBeNull();
+  });
+
   it("fulfills once without changing another email owner's waitlist, then replays to the result page", async () => {
     const key = randomUUID();
     const result = await checkout(body(), key);
@@ -196,9 +215,9 @@ describe("guest course checkout: real persistence, canonical seats and protected
     };
     const claimed = await checkoutRepository.claimStripeOrder(claim);
     expect(claimed).not.toBeNull();
-    expect(claimed?.guestCourseCheckout?.version).toBe(1);
-    expect(claimed?.guestCourseCheckout).not.toHaveProperty("accessNonce");
-    expect(claimed?.guestCourseCheckout).not.toHaveProperty("accessTokenHash");
+    expect(claimed).toHaveProperty("guestCourseCheckout.version", 1);
+    expect(claimed).not.toHaveProperty("guestCourseCheckout.accessNonce");
+    expect(claimed).not.toHaveProperty("guestCourseCheckout.accessTokenHash");
     await processCourseBookingsAfterPayment(claimed as any, { tenantId: String(tenantId) });
     await processCourseBookingsAfterPayment(claimed as any, { tenantId: String(tenantId) });
     expect(mocks.reconcileWaitlist).not.toHaveBeenCalled();

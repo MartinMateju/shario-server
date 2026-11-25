@@ -192,6 +192,20 @@ describe("public tenant configuration", () => {
     expect(response.body.tenant).not.toHaveProperty("onboarding");
   });
 
+  it("publishes only the canonical origin, not domain verification or plan records", async () => {
+    mocks.getTenantBySlug.mockResolvedValueOnce(tenantDocument({
+      ...liveTenant,
+      plan: "studio_plus",
+      planVersion: 3,
+      domains: [{ hostname: "booking.commonground.example", type: "custom", status: "active", isPrimary: true }],
+    }));
+    const response = await request(app).get("/tenants/studio-grohovka/config").expect(200);
+    expect(response.body.tenant.publicOrigin).toBe("https://booking.commonground.example");
+    expect(response.body.tenant).not.toHaveProperty("domains");
+    expect(response.body.tenant).not.toHaveProperty("plan");
+    expect(response.body.tenant).not.toHaveProperty("planVersion");
+  });
+
   it("reads the freshly published favicon even when the default lookup still has a stale cached tenant", async () => {
     const oldFavicon = "https://media.example.test/favicon/old.png";
     const newFavicon = "https://media.example.test/favicon/new.png";

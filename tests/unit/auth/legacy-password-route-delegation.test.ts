@@ -26,15 +26,6 @@ vi.mock("@/modules/user/user.utils.js", () => ({
       .toLowerCase(),
 }));
 
-vi.mock("@/modules/user/user.constants.js", () => ({
-  PLATFORM_ROLE: {
-    NONE: "none",
-  },
-  TENANT_ROLE: {
-    CUSTOMER: "customer",
-  },
-}));
-
 vi.mock("@/modules/tenant-access/tenant-membership.model.js", () => ({
   default: {
     exists: vi.fn(),

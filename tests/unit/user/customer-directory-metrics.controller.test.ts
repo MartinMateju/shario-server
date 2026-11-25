@@ -5,6 +5,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   listUsers: vi.fn(),
   listUsersWithFilters: vi.fn(),
+  getCustomerMembershipSummary: vi.fn(),
+}));
+vi.mock("@/modules/user/services/user.membership-summary.service.js", () => ({
+  getCustomerMembershipSummary: mocks.getCustomerMembershipSummary,
 }));
 vi.mock("@/modules/user/services/user.read.service.js", () => ({
   ...mocks,
@@ -15,6 +19,7 @@ vi.mock("@/modules/user/services/user.read.service.js", () => ({
 import {
   getAllUsers,
   getUsersWithFilters,
+  getCustomerSummary,
 } from "@/modules/user/controllers/user.read.controller.js";
 
 const tenantId = "64b000000000000000000201";
@@ -37,6 +42,7 @@ app.use((req, _res, next) => {
   next();
 });
 app.get("/users", getAllUsers);
+app.get("/users/summary", getCustomerSummary);
 app.post("/users/filter", getUsersWithFilters);
 
 describe("customer-directory metric authorization context", () => {
@@ -44,6 +50,13 @@ describe("customer-directory metric authorization context", () => {
     vi.clearAllMocks();
     mocks.listUsers.mockResolvedValue([]);
     mocks.listUsersWithFilters.mockResolvedValue({ data: [], totalCount: 0 });
+    mocks.getCustomerMembershipSummary.mockResolvedValue({ activeMemberships: 7 });
+  });
+  it("ignores client filters and scope overrides for the authoritative summary", async () => {
+    const response = await request(app).get("/users/summary?page=2&search=nobody&locationId=other").expect(200);
+    expect(mocks.getCustomerMembershipSummary).toHaveBeenCalledWith({ tenantId, access: trustedAccess });
+    expect(response.body.activeMemberships).toBe(7);
+    expect(response.headers["cache-control"]).toBe("private, no-store");
   });
   it("passes trusted middleware access to the bare directory", async () => {
     await request(app)

@@ -14,6 +14,7 @@ import {
 import { startWorkerOperationalTelemetry } from "@/infrastructure/queues/worker-operational-telemetry.js";
 import { CronSupervisor } from "@/infrastructure/scheduling/cron-supervisor.js";
 import { createRedisSchedulerCoordinator } from "@/infrastructure/scheduling/redis-scheduler-coordinator.js";
+import { publishWorkerHeartbeat } from "@/infrastructure/operations/worker-heartbeats.js";
 import { runAutomatedCommunications } from "@/modules/communication-automations/services/communication-automation-runner.service.js";
 import { runCustomOrderDeadlineReminders } from "@/modules/custom-orders/custom-order.reminders.js";
 
@@ -43,7 +44,10 @@ export const startCommunicationAutomationScheduler = async () => {
     role: "communication-scheduler",
     queueName: communicationEmailQueueName,
     queue: communicationEmailQueue,
-    emit: (sample) => logger.info(sample, "Worker operational sample."),
+    emit: (sample) => {
+      logger.info(sample, "Worker operational sample.");
+      publishWorkerHeartbeat(sample);
+    },
   });
 
   const runSchedulerTick = async (): Promise<void> => {

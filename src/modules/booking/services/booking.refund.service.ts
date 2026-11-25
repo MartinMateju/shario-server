@@ -1,3 +1,5 @@
+import { assertOrdersHaveNoProviderRefund } from "@/modules/tenant-payments/services/payment-refund-reconciliation.service.js";
+import { recordBookingCancellation } from "../booking-cancellation-event.model.js";
 import {
   BOOKING_STATUS,
   CLASS_BOOKING_TAGS,
@@ -520,12 +522,15 @@ export const cancelBookingWithRefund = async ({
   bookingId,
   userId,
   actorUserId = String(userId),
+  cancellationActorType,
 }: {
   tenantId: TenantId;
   bookingId: IdLike;
   userId: IdLike;
   actorUserId?: string;
+  cancellationActorType?: "customer" | "staff";
 }) => {
+  const cancellationOccurredAt = new Date();
   const session = await mongoose.startSession();
 
   try {
@@ -591,6 +596,7 @@ export const cancelBookingWithRefund = async ({
         }
       }
       const cancellableBooking = validateCancellableBooking(booking, userId);
+      await assertOrdersHaveNoProviderRefund(String(tenantId), (cancellableBooking.orders ?? []).map((order) => String(order._id)), session);
       if (!hasPaidBookingSource(cancellableBooking)) {
         conflict({
           message:
@@ -644,6 +650,15 @@ export const cancelBookingWithRefund = async ({
 
       await bookingRepository.save(cancellableBooking as never);
       await accessCodeNotifications.markCancelled(cancellableBooking._id);
+      await recordBookingCancellation({
+        operationId: `open-studio:${String(cancellableBooking._id)}`,
+        tenantId: String(tenantId), locationId: getId(cancellableBooking.location),
+        bookingId: String(cancellableBooking._id), customerId: String(userId),
+        actorId: actorUserId,
+        actorType: cancellationActorType ?? (actorUserId === String(userId) ? "customer" : "staff"),
+        source: "open_studio", occurredAt: cancellationOccurredAt,
+        seats: Math.max(Number(cancellableBooking.numberOfGuests) || 1, 1),
+      }, session);
 
       // The original payment can be a membership allowance or voucher, while
       // added time is a separate card/credit payment. Restore each source once
@@ -823,10 +838,21 @@ export const cancelBookingWithRefund = async ({
       }
 
       const tenantCurrency = normalizeRefundCurrency(tenant.settings?.currency);
-      const refundSnapshot = resolveBookingRefundSnapshot(
+      const resolvedRefundSnapshot = resolveBookingRefundSnapshot(
         cancellableBooking,
         tenantCurrency,
       );
+      // A booking with no paid order behind it (for example an imported one)
+      // has no recorded payment. Never mint studio credit for it from the
+      // current catalogue price; staff can grant credit manually if owed.
+      const hasRecordedPayment = Boolean(
+        cancellableBooking.orders?.some((order) => order?.isPaid === true),
+      );
+      const refundSnapshot =
+        resolvedRefundSnapshot.source === "legacy_product_price" &&
+        !hasRecordedPayment
+          ? { ...resolvedRefundSnapshot, refundAmount: 0 }
+          : resolvedRefundSnapshot;
 
       if (refundSnapshot.source === "order_line_unavailable") {
         conflict({

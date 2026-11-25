@@ -235,11 +235,11 @@ const getCapabilities = async (
   now: Date,
   session: ClientSession | null = null,
 ) => {
-  const future =
-    new Date(booking.start) > now &&
+  const activeConfirmed =
     !booking.archive &&
     !["cancelled", "canceled", "completed"].includes(booking.status) &&
     booking.paymentStatus === "CONFIRMED";
+  const future = activeConfirmed && new Date(booking.start) > now;
   const pending = hasPaymentHold(booking, now);
   // Course fulfillment can still consume a stored order-backed hold after its
   // expiry until checkout cleanup resolves it. Staff cannot repurpose it.
@@ -258,6 +258,23 @@ const getCapabilities = async (
         tenantId,
         session,
       }).hasInFlightDeliveryForBooking(booking._id, now)));
+  const participantsReason = rosterReview
+    ? "BOOKING_EDIT_ATTENDANCE_REVIEW_REQUIRED"
+    : !future
+      ? "BOOKING_EDIT_NOT_ALLOWED"
+      : pending
+        ? "BOOKING_EDIT_PAYMENT_IN_PROGRESS"
+        : undefined;
+  // Staff can correct historical times without reopening attendance changes.
+  const scheduleReason = rosterReview
+    ? "BOOKING_EDIT_ATTENDANCE_REVIEW_REQUIRED"
+    : !activeConfirmed
+      ? "BOOKING_EDIT_NOT_ALLOWED"
+      : pending || waitlistOffer || storedCourseReservation
+        ? "BOOKING_EDIT_PAYMENT_IN_PROGRESS"
+        : accessLocked
+          ? "BOOKING_EDIT_ACCESS_DELIVERY_IN_PROGRESS"
+          : undefined;
   return {
     canEdit: true,
     canEditParticipants: future && !pending && !rosterReview,
@@ -266,33 +283,9 @@ const getCapabilities = async (
     ...(storedCourseReservation
       ? { addParticipantsReason: "BOOKING_EDIT_PAYMENT_IN_PROGRESS" }
       : {}),
-    canReschedule:
-      future &&
-      !pending &&
-      !storedCourseReservation &&
-      !waitlistOffer &&
-      !accessLocked &&
-      !rosterReview,
-    ...(rosterReview
-      ? {
-          participantsReason: "BOOKING_EDIT_ATTENDANCE_REVIEW_REQUIRED",
-          scheduleReason: "BOOKING_EDIT_ATTENDANCE_REVIEW_REQUIRED",
-        }
-      : !future
-        ? {
-            participantsReason: "BOOKING_EDIT_NOT_ALLOWED",
-            scheduleReason: "BOOKING_EDIT_NOT_ALLOWED",
-          }
-        : pending
-          ? {
-              participantsReason: "BOOKING_EDIT_PAYMENT_IN_PROGRESS",
-              scheduleReason: "BOOKING_EDIT_PAYMENT_IN_PROGRESS",
-            }
-          : waitlistOffer || storedCourseReservation
-            ? { scheduleReason: "BOOKING_EDIT_PAYMENT_IN_PROGRESS" }
-            : accessLocked
-              ? { scheduleReason: "BOOKING_EDIT_ACCESS_DELIVERY_IN_PROGRESS" }
-              : {}),
+    canReschedule: scheduleReason === undefined,
+    ...(participantsReason ? { participantsReason } : {}),
+    ...(scheduleReason ? { scheduleReason } : {}),
     ...(rosterReview
       ? {
           reason:
@@ -313,17 +306,22 @@ const getCapabilities = async (
                 reason:
                   "A waitlist place is currently offered. Wait for that offer to finish before changing the session time.",
               }
-            : !future
+            : !activeConfirmed
               ? {
                   reason:
-                    "Only a future confirmed booking can change attendance or time.",
+                    "Only an active confirmed booking can change time. Attendance changes also require a future booking.",
                 }
               : accessLocked
                 ? {
                     reason:
                       "Access delivery must finish or be reviewed before changing the booking time.",
                   }
-                : {}),
+                : !future
+                  ? {
+                      reason:
+                        "Attendance can only be changed for a future confirmed booking.",
+                    }
+                  : {}),
     scheduleNotification: studio(booking) ? "customer_email" : "none",
     preserveDuration: studio(booking),
   };
@@ -639,6 +637,7 @@ export const saveBookingEditor = async (
             ),
             location,
             now,
+            allowPast: true,
           });
         }
         const candidate: any = {

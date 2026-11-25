@@ -57,8 +57,14 @@ import {
   getMyBooking,
   rescheduleMyBooking,
 } from "@/modules/booking/booking.customer.service.js";
-import { assertExtensionHours, resolveExtensionPrice } from "@/modules/booking/booking.extension.service.js";
-import { getCustomerBookingRescheduleAvailability, rescheduleCustomerBooking } from "@/modules/booking/booking.customer.controller.js";
+import {
+  assertExtensionHours,
+  resolveExtensionPrice,
+} from "@/modules/booking/booking.extension.service.js";
+import {
+  getCustomerBookingRescheduleAvailability,
+  rescheduleCustomerBooking,
+} from "@/modules/booking/booking.customer.controller.js";
 import { errorHandler } from "@/shared/http/errorHandler.js";
 import { checkoutRepository } from "@/modules/checkout/checkout.repository.js";
 
@@ -660,9 +666,13 @@ describe("staff booking editor transaction boundary", () => {
     ).toHaveLength(2);
   });
 
-  it.each(["issued", "legacy"])(
-    "moves a paid %s-access booking without reopening customer edits or losing its history",
-    async (source) => {
+  it.each([
+    ["issued", "future"],
+    ["legacy", "future"],
+    ["issued", "past"],
+  ])(
+    "moves a paid %s-access booking to the %s without reopening customer edits or losing its history",
+    async (source, target) => {
       await Order.collection.insertOne({
         _id: ids.order,
         tenant: ids.tenant,
@@ -706,8 +716,12 @@ describe("staff booking editor transaction boundary", () => {
         canEditParticipants: true,
         canReschedule: true,
       });
-      const nextStart = new Date("2035-01-09T11:00:00Z");
-      const nextEnd = new Date("2035-01-09T13:00:00Z");
+      const nextStart = new Date(
+        target === "past" ? "2034-12-30T11:00:00Z" : "2035-01-09T11:00:00Z",
+      );
+      const nextEnd = new Date(
+        target === "past" ? "2034-12-30T13:00:00Z" : "2035-01-09T13:00:00Z",
+      );
       const result = await saveBookingEditor({
         ...context,
         input: {
@@ -1013,6 +1027,406 @@ describe("staff booking editor transaction boundary", () => {
     await expect(save({ note: "Review this roster" })).resolves.toMatchObject({
       booking: { note: "Review this roster", numberOfGuests: 1 },
     });
+  });
+
+  it.each(["open-studio", "class"])(
+    "corrects a paid %s booking from future to past, then past to past and back to future without changing its purchase",
+    async (tag) => {
+      if (tag === "open-studio") {
+        await Booking.updateOne(
+          { _id: ids.booking },
+          { $set: { tag, participants: [] } },
+        );
+      }
+      await Order.create({
+        _id: ids.order,
+        cart: new mongoose.Types.ObjectId(),
+        tenant: ids.tenant,
+        createdBy: ids.customer,
+        status: "processed_order",
+        isPaid: true,
+        currency: "CZK",
+        grossAmountMinor: 50000,
+        expectedAmountMinor: 50000,
+        ...(tag === "class"
+          ? { courseBookings: [{ bookingId: ids.booking, quantity: 2 }] }
+          : { workshopBookings: [ids.booking] }),
+        lineItems: [
+          {
+            booking: ids.booking,
+            product: ids.product,
+            description: "Paid booking",
+            quantity: 2,
+            unitGrossMinor: 25000,
+            grossAmountMinor: 50000,
+            netAmountMinor: 50000,
+            taxAmountMinor: 0,
+            taxRateBps: 0,
+            locationIds: [ids.location],
+          },
+        ],
+        paymentAllocations: [
+          {
+            method: "stripe",
+            amountMinor: 50000,
+            providerReference: "pi_booking_history",
+          },
+        ],
+      });
+      const originalOrder = await Order.findById(ids.order).lean();
+      const originalBooking = await Booking.findById(ids.booking).lean();
+      const moves = [
+        ["2034-12-30T10:00:00Z", "2034-12-30T12:00:00Z"],
+        ["2034-12-29T11:00:00Z", "2034-12-29T13:00:00Z"],
+        ["2035-01-09T11:00:00Z", "2035-01-09T13:00:00Z"],
+      ];
+      let previousStart = start;
+      let previousEnd = end;
+      for (const [index, [nextStart, nextEnd]] of moves.entries()) {
+        await save({ start: nextStart, end: nextEnd });
+        const stored = await Booking.findById(ids.booking)
+          .select("+scheduleChangeHistory")
+          .lean();
+        expect(stored).toMatchObject({
+          start: new Date(nextStart),
+          end: new Date(nextEnd),
+          orders: originalBooking!.orders,
+          paymentStatus: "CONFIRMED",
+          numberOfGuests: originalBooking!.numberOfGuests,
+          participants: originalBooking!.participants,
+        });
+        expect(Number(stored!.numberOfHours)).toBe(2);
+        expect(await Order.findById(ids.order).lean()).toEqual(originalOrder);
+        expect(stored!.scheduleChangeHistory).toHaveLength(index + 1);
+        expect(stored!.scheduleChangeHistory[index]).toMatchObject({
+          actor: ids.staff,
+          changedAt: now,
+          previousStart,
+          previousEnd,
+          nextStart: new Date(nextStart),
+          nextEnd: new Date(nextEnd),
+        });
+        expect((await editor()).capabilities).toMatchObject({
+          canReschedule: true,
+          canEditParticipants: index === 2,
+          canAddParticipants: index === 2,
+        });
+        if (index < 2) {
+          expect(getCustomerBookingCapabilities(stored!, now)).toMatchObject({
+            canReschedule: false,
+            canCancel: false,
+          });
+          const current = await editor();
+          await expect(
+            save({
+              participants: [{ id: current.participants[0].id }],
+            }),
+          ).rejects.toMatchObject({ code: "BOOKING_EDIT_NOT_ALLOWED" });
+          expect(
+            await Booking.findById(ids.booking)
+              .select("+scheduleChangeHistory")
+              .lean(),
+          ).toEqual(stored);
+        }
+        previousStart = new Date(nextStart);
+        previousEnd = new Date(nextEnd);
+      }
+      expect(notifications.record).toHaveBeenCalledTimes(
+        tag === "open-studio" ? 3 : 0,
+      );
+    },
+  );
+
+  it.each(["open-studio", "class"])(
+    "rolls back a historical %s move, metadata and access state when that past slot is full",
+    async (tag) => {
+      const pastStart = new Date("2034-12-28T11:00:00Z");
+      const pastEnd = new Date("2034-12-28T13:00:00Z");
+      await Booking.updateOne(
+        { _id: ids.booking },
+        {
+          $set: {
+            tag,
+            start: pastStart,
+            end: pastEnd,
+            ...(tag === "open-studio"
+              ? {
+                  participants: [],
+                  accessCodeDelivery: {
+                    status: "sent",
+                    deliveredAt: pastStart,
+                  },
+                }
+              : {}),
+          },
+        },
+      );
+      const before = await Booking.findById(ids.booking)
+        .select("+scheduleChangeHistory")
+        .lean();
+      await Booking.collection.insertOne({
+        ...before!,
+        _id: new mongoose.Types.ObjectId(),
+        tag: "open-studio",
+        start: new Date("2034-12-30T11:00:00Z"),
+        end: new Date("2034-12-30T13:00:00Z"),
+        bookingType: "private",
+        bookingMode: "private",
+        participants: [],
+      } as any);
+      const locationBefore = await Location.findById(ids.location).lean();
+      await expect(
+        save({
+          start: "2034-12-30T11:00:00Z",
+          end: "2034-12-30T13:00:00Z",
+          note: "Must roll back",
+          lecturer: "Must also roll back",
+        }),
+      ).rejects.toMatchObject({
+        statusCode: 409,
+        code: "BOOKING_EDIT_CAPACITY_EXCEEDED",
+      });
+      expect(
+        await Booking.findById(ids.booking)
+          .select("+scheduleChangeHistory")
+          .lean(),
+      ).toEqual(before);
+      expect(await Location.findById(ids.location).lean()).toEqual(
+        locationBefore,
+      );
+      expect(notifications.record).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    [
+      "paid duration",
+      "2034-12-30T11:00:00Z",
+      "2034-12-30T14:00:00Z",
+      "BOOKING_EDIT_DURATION_REQUIRES_PAYMENT_WORKFLOW",
+    ],
+    [
+      "booking grid",
+      "2034-12-30T11:15:00Z",
+      "2034-12-30T13:15:00Z",
+      "CUSTOMER_BOOKING_RESCHEDULE_STEP_INVALID",
+    ],
+    [
+      "opening hours",
+      "2034-12-30T22:00:00Z",
+      "2034-12-31T00:00:00Z",
+      "CUSTOMER_BOOKING_RESCHEDULE_OUTSIDE_HOURS",
+    ],
+  ])(
+    "keeps the %s guard for a past studio correction and rolls back its transaction",
+    async (_guard, nextStart, nextEnd, code) => {
+      await Booking.updateOne(
+        { _id: ids.booking },
+        {
+          $set: {
+            tag: "open-studio",
+            participants: [],
+            start: new Date("2034-12-28T11:00:00Z"),
+            end: new Date("2034-12-28T13:00:00Z"),
+          },
+        },
+      );
+      const before = await Booking.findById(ids.booking)
+        .select("+scheduleChangeHistory")
+        .lean();
+      const locationBefore = await Location.findById(ids.location).lean();
+      await expect(
+        save({ start: nextStart, end: nextEnd, note: "Must roll back" }),
+      ).rejects.toMatchObject({ code });
+      expect(
+        await Booking.findById(ids.booking)
+          .select("+scheduleChangeHistory")
+          .lean(),
+      ).toEqual(before);
+      expect(await Location.findById(ids.location).lean()).toEqual(
+        locationBefore,
+      );
+      expect(notifications.record).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    {
+      guard: "active extension payment",
+      tag: "open-studio",
+      fields: { extensionPaymentPendingUntil: end },
+      reason: "BOOKING_EDIT_PAYMENT_IN_PROGRESS",
+    },
+    {
+      guard: "active course payment hold",
+      tag: "class",
+      fields: {
+        capacityReservations: [
+          { order: new mongoose.Types.ObjectId(), quantity: 1, expiresAt: end },
+        ],
+      },
+      reason: "BOOKING_EDIT_PAYMENT_IN_PROGRESS",
+    },
+    {
+      guard: "expired but consumable course payment hold",
+      tag: "class",
+      fields: {
+        capacityReservations: [
+          {
+            order: new mongoose.Types.ObjectId(),
+            quantity: 1,
+            expiresAt: new Date("2034-12-31T00:00:00Z"),
+          },
+        ],
+      },
+      reason: "BOOKING_EDIT_PAYMENT_IN_PROGRESS",
+    },
+    {
+      guard: "waitlist offer",
+      tag: "class",
+      fields: {
+        waitlistCapacityHolds: [
+          {
+            entry: new mongoose.Types.ObjectId(),
+            offerGeneration: 1,
+            expiresAt: end,
+          },
+        ],
+      },
+      reason: "BOOKING_EDIT_PAYMENT_IN_PROGRESS",
+    },
+    {
+      guard: "inconsistent roster",
+      tag: "class",
+      fields: { numberOfGuests: 1 },
+      reason: "BOOKING_EDIT_ATTENDANCE_REVIEW_REQUIRED",
+    },
+    {
+      guard: "ambiguous access delivery",
+      tag: "open-studio",
+      fields: { accessCodeDelivery: { status: "delivery_unknown" } },
+      reason: "BOOKING_EDIT_ACCESS_DELIVERY_IN_PROGRESS",
+    },
+    {
+      guard: "active access delivery",
+      tag: "open-studio",
+      fields: {
+        accessCodeDelivery: { status: "processing", leaseExpiresAt: end },
+      },
+      reason: "BOOKING_EDIT_ACCESS_DELIVERY_IN_PROGRESS",
+    },
+    {
+      guard: "archive",
+      tag: "class",
+      fields: { archive: true },
+      reason: "BOOKING_EDIT_NOT_ALLOWED",
+    },
+    {
+      guard: "cancelled status",
+      tag: "class",
+      fields: { status: "cancelled" },
+      reason: "BOOKING_EDIT_NOT_ALLOWED",
+    },
+    {
+      guard: "canceled legacy status",
+      tag: "class",
+      fields: { status: "canceled" },
+      reason: "BOOKING_EDIT_NOT_ALLOWED",
+    },
+    {
+      guard: "completed status",
+      tag: "class",
+      fields: { status: "completed" },
+      reason: "BOOKING_EDIT_NOT_ALLOWED",
+    },
+    {
+      guard: "unconfirmed payment",
+      tag: "class",
+      fields: { paymentStatus: "PENDING_PAYMENT" },
+      reason: "BOOKING_EDIT_NOT_ALLOWED",
+    },
+  ])(
+    "keeps $guard locked on an already-past booking",
+    async ({ tag, fields, reason }) => {
+      // Use collection updates for legacy statuses the current schema no longer emits.
+      await Booking.collection.updateOne(
+        { _id: ids.booking },
+        {
+          $set: {
+            tag,
+            start: new Date("2034-12-28T11:00:00Z"),
+            end: new Date("2034-12-28T13:00:00Z"),
+            ...(tag === "open-studio" ? { participants: [] } : {}),
+            ...fields,
+          },
+        },
+      );
+      expect((await editor()).capabilities).toMatchObject({
+        canReschedule: false,
+        canEditParticipants: false,
+        canAddParticipants: false,
+        scheduleReason: reason,
+      });
+      const before = await Booking.findById(ids.booking)
+        .select("+scheduleChangeHistory")
+        .lean();
+      await expect(
+        save({
+          start: "2034-12-30T11:00:00Z",
+          end: "2034-12-30T13:00:00Z",
+          note: "Must not persist",
+        }),
+      ).rejects.toMatchObject({ statusCode: 409 });
+      expect(
+        await Booking.findById(ids.booking)
+          .select("+scheduleChangeHistory")
+          .lean(),
+      ).toEqual(before);
+      expect(notifications.record).not.toHaveBeenCalled();
+    },
+  );
+
+  it("keeps customer past-date moves denied and rejects an injected allowPast override over HTTP", async () => {
+    await Booking.updateOne(
+      { _id: ids.booking },
+      { $set: { tag: "open-studio", participants: [] } },
+    );
+    const before = await Booking.findById(ids.booking)
+      .select("+scheduleChangeHistory")
+      .lean();
+    await expect(
+      rescheduleMyBooking({
+        tenantId: context.tenantId,
+        userId: String(ids.customer),
+        bookingId: context.bookingId,
+        start: new Date("2034-12-30T11:00:00Z"),
+        now,
+      }),
+    ).rejects.toMatchObject({ code: "CUSTOMER_BOOKING_RESCHEDULE_IN_PAST" });
+    const app = overnightCustomerApp();
+    const path = `/bookings/mine/${ids.booking}/reschedule`;
+    const past = await request(app)
+      .patch(path)
+      .send({ start: "2001-01-01T11:00:00Z" });
+    expect(past.status).toBe(409);
+    expect(past.body.code).toBe("CUSTOMER_BOOKING_RESCHEDULE_IN_PAST");
+    const spoof = await request(app)
+      .patch(path)
+      .send({ start: "2001-01-01T11:00:00Z", allowPast: true });
+    expect(spoof.status).toBe(400);
+    await expect(
+      save({
+        start: "2034-12-30T11:00:00Z",
+        end: "2034-12-30T13:00:00Z",
+        allowPast: true,
+      }),
+    ).rejects.toMatchObject({ code: "BOOKING_EDIT_INVALID" });
+    expect(
+      await Booking.findById(ids.booking)
+        .select("+scheduleChangeHistory")
+        .lean(),
+    ).toEqual(before);
+    expect(notifications.record).not.toHaveBeenCalled();
   });
 
   it("moves a course through opening-hours validation without changing sold orders or emailing staff", async () => {

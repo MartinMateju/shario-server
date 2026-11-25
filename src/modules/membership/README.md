@@ -60,14 +60,14 @@ resource to a benefit key. They must call
 stable reference and idempotency key. This avoids silently spending the wrong
 benefit.
 
-Refund and dispute automation is also outside V1 because partial-refund and
-already-consumed-benefit semantics require an explicit business policy. A
-Stripe refund by itself does not cancel a membership, cancel its Subscription,
-or restore/expire entitlements. The owner must also cancel the membership in
-the app (and adjust benefits when appropriate). A dispute requires operational
-review and manual cancellation/adjustment if access should be revoked. Future
-automation must add explicit refund/dispute event handling and idempotent ledger
-rules before those events can change membership state.
+Dashboard refunds are financially reconciled through the tenant-payments module.
+Refund totals and review status appear on membership invoices. A refund alone
+does not cancel a membership or its Subscription, or restore/expire benefits.
+Staff decide any benefit adjustment and acknowledge it with evidence; a refund
+observed before fulfillment blocks new automatic entitlement grants. This is
+record-and-review policy, not automatic benefit proration. See
+[the refund runbook](../../../docs/stripe-refund-review.md). Disputes remain
+operational review and manual cancellation/adjustment where appropriate.
 
 ## Routes
 

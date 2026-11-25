@@ -205,9 +205,31 @@ describe("tenant public-site editor controller contract", () => {
     expect(res.status).not.toHaveBeenCalled();
   });
 
-  it("rejects an unknown media slot before storage is called", async () => {
+  it("accepts page hero uploads for the authenticated tenant and exact draft revision", async () => {
     const { res, next } = await invoke(uploadCurrentTenantPublicSiteMedia, {
-      params: { slot: "rawHtml" },
+      params: { slot: "waitingListHero" },
+      body: { revision: "4" },
+    });
+    expect(next).not.toHaveBeenCalled();
+    expect(mocks.uploadTenantPublicSiteMedia).toHaveBeenCalledWith({
+      tenantId: "tenant-1", slot: "waitingListHero", file: undefined, revision: 4, locationId: undefined,
+    });
+    expectPrivateEditorResponse(res, 201);
+  });
+
+  it("rejects a body tenant on a page hero upload", async () => {
+    const { res, next } = await invoke(uploadCurrentTenantPublicSiteMedia, {
+      params: { slot: "membershipsHero" },
+      body: { revision: "4", tenantId: "attacker-tenant" },
+    });
+    expect(next).toHaveBeenCalledWith(expect.any(Error));
+    expect(mocks.uploadTenantPublicSiteMedia).not.toHaveBeenCalled();
+    expect(res.status).not.toHaveBeenCalled();
+  });
+
+  it.each(["rawHtml", "calendarHero", "bookHero"])("rejects the unsupported %s media slot before storage is called", async (slot) => {
+    const { res, next } = await invoke(uploadCurrentTenantPublicSiteMedia, {
+      params: { slot },
       body: { revision: "4" },
     });
 

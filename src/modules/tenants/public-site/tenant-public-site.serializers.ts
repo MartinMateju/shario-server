@@ -2,12 +2,15 @@ import { serializePortalAppearance } from "@/shared/appearance/portal-appearance
 import type {
   TenantDocument,
   TenantPublicSite,
+  TenantPublicSiteCustomLink,
+  TenantPublicSiteHeaderLink,
   TenantPublicSiteLocalizedText,
 } from "../tenant.types.js";
 import { ROLLOUT_ELIGIBLE_APP_LOCALES } from "@/shared/i18n/locales.js";
 import {
   CUSTOMER_PORTAL_NAVIGATION_KEYS,
   CUSTOMER_PORTAL_PAGE_IDS,
+  CUSTOMER_PORTAL_PAGE_IMAGE_KEYS,
   DEFAULT_PUBLIC_SITE_ACCENT_COLOR,
   DEFAULT_PUBLIC_SITE_BACKGROUND_COLOR,
   DEFAULT_PUBLIC_SITE_FONT_PRESET,
@@ -35,6 +38,8 @@ import {
 import {
   isSafePublicSiteText,
   isSafePublicSiteUrl,
+  publicSiteCustomLinkSchema,
+  publicSiteHeaderLinkSchema,
 } from "./tenant-public-site.validators.js";
 
 type TenantPublicSiteSource = Pick<TenantDocument, "name"> & {
@@ -78,6 +83,81 @@ const publicUrl = (
 ): string => {
   const candidate = text(value, PUBLIC_SITE_LIMITS.URL);
   return isSafePublicSiteUrl(candidate, options) ? candidate : "";
+};
+
+// Mongoose localized subdocuments carry bookkeeping keys outside the contract.
+const customLinkLocaleValues = (value: unknown) => Object.fromEntries(
+  ROLLOUT_ELIGIBLE_APP_LOCALES.map((locale) => [locale, record(value)[locale] ?? ""]),
+);
+
+const normalizedCustomLink = (link: { id: string; label: unknown; href: unknown }): TenantPublicSiteCustomLink => ({
+  id: link.id,
+  label: localized(link.label, undefined, 80),
+  href: localized(link.href, undefined, PUBLIC_SITE_LIMITS.URL),
+});
+
+const customLinks = (value: unknown, limit: number): TenantPublicSiteCustomLink[] => {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  const links: TenantPublicSiteCustomLink[] = [];
+  for (const candidate of value.slice(0, limit)) {
+    const source = record(candidate);
+    const parsed = publicSiteCustomLinkSchema.safeParse({
+      id: source.id,
+      label: customLinkLocaleValues(source.label),
+      href: customLinkLocaleValues(source.href),
+    });
+    if (!parsed.success || seen.has(parsed.data.id)) continue;
+    seen.add(parsed.data.id);
+    links.push(normalizedCustomLink(parsed.data));
+  }
+  return links;
+};
+
+const headerLinkValues = (value: unknown, isChild = false): Record<string, unknown> => {
+  const source = record(value);
+  return {
+    id: source.id,
+    label: customLinkLocaleValues(source.label),
+    ...(source.href !== undefined ? { href: customLinkLocaleValues(source.href) } : {}),
+    ...(source.emphasis !== undefined ? { emphasis: source.emphasis } : {}),
+    ...(source.separatorBefore !== undefined ? { separatorBefore: source.separatorBefore } : {}),
+    ...(source.children !== undefined ? {
+      // Leave deeper nesting intact so validation rejects it instead of silently
+      // converting malformed persisted groups into leaf links.
+      children: !isChild && Array.isArray(source.children)
+        ? source.children.map((child: unknown) => headerLinkValues(child, true))
+        : source.children,
+    } : {}),
+  };
+};
+
+const headerLinks = (value: unknown): TenantPublicSiteHeaderLink[] => {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  const links: TenantPublicSiteHeaderLink[] = [];
+  let hasButton = false;
+  for (const candidate of value.slice(0, 8)) {
+    const parsed = publicSiteHeaderLinkSchema.safeParse(headerLinkValues(candidate));
+    if (!parsed.success || seen.has(parsed.data.id)) continue;
+    const link = parsed.data;
+    seen.add(link.id);
+    if ("children" in link) {
+      links.push({
+        id: link.id,
+        label: localized(link.label, undefined, 80),
+        children: link.children.map((child) => ({
+          ...normalizedCustomLink(child),
+          separatorBefore: child.separatorBefore ?? false,
+        })),
+      });
+    } else {
+      const emphasis = link.emphasis === "button" && !hasButton ? "button" : undefined;
+      hasButton ||= emphasis === "button";
+      links.push({ ...normalizedCustomLink(link), ...(emphasis ? { emphasis } : {}) });
+    }
+  }
+  return links;
 };
 
 const email = (value: unknown): string => {
@@ -331,6 +411,11 @@ export const serializeTenantPublicSite = (
       labelColor: color(register.labelColor),
     },
     header: {
+      layout: header.layout === "website" ? "website" : "default",
+      backgroundColor: color(header.backgroundColor),
+      linkColor: color(header.linkColor),
+      buttonColor: color(header.buttonColor),
+      customLinks: headerLinks(header.customLinks),
       navOrder: resolvedNavigation(header.navOrder),
       hiddenItems: resolvedHiddenItems(header.hiddenItems),
       primaryCta: resolvedPrimaryCta(header.primaryCta),
@@ -344,6 +429,7 @@ export const serializeTenantPublicSite = (
       },
     },
     footer: {
+      customLinks: customLinks(footer.customLinks, 12),
       description: localized(
         footer.description,
         undefined,
@@ -467,6 +553,12 @@ export const serializeTenantPublicSite = (
       },
     },
     customerPortal: {
+      pageImages: Object.fromEntries(
+        CUSTOMER_PORTAL_PAGE_IMAGE_KEYS.map((page) => [
+          page,
+          publicUrl(record(customerPortal.pageImages)[page]),
+        ]),
+      ) as TenantPublicSite["customerPortal"]["pageImages"],
       courses: {
         guestCheckoutEnabled: record(customerPortal.courses).guestCheckoutEnabled === true,
         locations: Array.isArray(record(customerPortal.courses).locations)
