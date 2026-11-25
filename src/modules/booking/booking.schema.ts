@@ -437,6 +437,17 @@ bookingSchema.index({
   start: -1,
 });
 
+// Stable workspace table pagination, both for a selected location and across
+// all authorized locations. Add-only: existing booking indexes stay intact.
+bookingSchema.index(
+  { tenant: 1, location: 1, start: -1, _id: -1 },
+  { name: "tenant_location_booking_directory_order" },
+);
+bookingSchema.index(
+  { tenant: 1, start: -1, _id: -1 },
+  { name: "tenant_booking_directory_order" },
+);
+
 /**
  * Future course / workshop listing
  */

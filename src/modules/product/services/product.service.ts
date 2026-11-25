@@ -5,12 +5,12 @@ import { isOpenStudioLocationDuplicateError } from "../open-studio-location-inde
 import { assertStudioProductLocationAccess, buildProductLocationFilter, getStudioProductLocationId, isStudioProduct } from "../product-location.policy.js";
 import { assertVoucherCanBeIssued, normalizeVoucherSettings } from "@/modules/coupon/voucher-policy.js";
 import { voucherDesignSchema } from "@/modules/coupon/voucher-design.js";
-import { prepareVoucherDesign } from "./voucher-design.service.js";
+import { prepareVoucherDesign, resolvePublicVoucherImageSrc } from "./voucher-design.service.js";
 import { uploadBufferToR2 } from "@/infrastructure/storage/r2.client.js";
 import { getTenantOrThrow } from "@/modules/tenants/services/tenant.service.js";
 import { TENANT_MODULE } from "@/modules/tenants/tenant.constants.js";
 import { isCourseBrowsingVisible } from "@/modules/tenants/public-site/tenant-course-visibility.js";
-import type { TenantModules } from "@/modules/tenants/tenant.types.js";
+import type { TenantDocument, TenantModules } from "@/modules/tenants/tenant.types.js";
 import {
   normalizeStudioCommerceCurrency,
   toCurrencyMinorUnits,
@@ -358,6 +358,43 @@ const filterPublicProductTypesForPlan = ({
     );
   });
 
+// Share the same publication, plan and location restrictions between counted
+// catalogues and the lightweight course list used by anonymous visitors.
+const publicCatalogFilters = (tenant: TenantDocument, params: {
+  coursesOnly?: boolean;
+  respectPublicCourseVisibility?: boolean;
+  locationId?: string;
+  search?: string;
+  page?: number;
+  limit?: number;
+}) => {
+  const coursePagesVisible =
+    !params.respectPublicCourseVisibility || isCourseBrowsingVisible(tenant);
+  const types = filterPublicProductTypesForPlan({
+    tenant,
+    types: getEnabledPublicProductTypes({
+      coursesOnly: params.coursesOnly,
+      modules: tenant.modules,
+    }),
+  }).filter(
+    (type) =>
+      coursePagesVisible ||
+      !PUBLIC_COURSE_PRODUCT_TYPES.includes(
+        type as (typeof PUBLIC_COURSE_PRODUCT_TYPES)[number],
+      ),
+  );
+  return {
+    types,
+    isActive: true,
+    locationId: params.locationId,
+    coursePublicationLocationId: params.locationId,
+    assignedStudioOnly: true,
+    search: params.search,
+    page: params.page,
+    limit: params.limit,
+  };
+};
+
 const assertPublicProductTypeEnabled = ({
   modules,
   type,
@@ -575,25 +612,11 @@ export const productService = {
     totalPages: number;
   }> {
     const tenant = await getTenantOrThrow(params.tenantId);
-    const coursePagesVisible =
-      !params.respectPublicCourseVisibility || isCourseBrowsingVisible(tenant);
-    const types = filterPublicProductTypesForPlan({
-      tenant,
-      types: getEnabledPublicProductTypes({
-        coursesOnly: params.coursesOnly,
-        modules: tenant.modules,
-      }),
-    }).filter(
-      (type) =>
-        coursePagesVisible ||
-        !PUBLIC_COURSE_PRODUCT_TYPES.includes(
-          type as (typeof PUBLIC_COURSE_PRODUCT_TYPES)[number],
-        ),
-    );
+    const filters = publicCatalogFilters(tenant, params);
     const page = Math.max(Number(params.page || 1), 1);
     const limit = Math.min(Math.max(Number(params.limit || 50), 1), 100);
 
-    if (types.length === 0) {
+    if (!filters.types.length) {
       return {
         products: [],
         totalCount: 0,
@@ -603,22 +626,26 @@ export const productService = {
       };
     }
 
-    const result = await this.listProducts({
-      tenantId: params.tenantId,
-      locationId: params.locationId,
-      coursePublicationLocationId: params.locationId,
-      assignedStudioOnly: true,
-      types,
-      isActive: true,
-      search: params.search,
-      page: params.page,
-      limit: params.limit,
-    });
+    const result = await this.listProducts({ tenantId: params.tenantId, ...filters });
 
     return {
       ...result,
       products: result.products.map((product) => toProductCatalogDto(product)),
     };
+  },
+
+  async listPublicCoursePage(tenant: TenantDocument, query: {
+    locationId?: string;
+    search?: string;
+    page: number;
+    limit: number;
+  }): Promise<ProductCatalogDto[]> {
+    const filters = publicCatalogFilters(tenant, {
+      ...query, coursesOnly: true, respectPublicCourseVisibility: true,
+    });
+    if (!filters.types.length) return [];
+    const rows = await createProductRepository({ tenantId: String(tenant._id) }).list(filters);
+    return rows.map((row) => toProductCatalogDto(toProductPublicDto(row)));
   },
 
   async listPublicVoucherProducts(params: {
@@ -635,15 +662,14 @@ export const productService = {
 
     if (types.length === 0) return [];
 
-    const result = await this.listProducts({
-      tenantId: params.tenantId,
+    const rows = await createProductRepository({ tenantId: params.tenantId }).list({
       types,
       isActive: true,
       page: 1,
       limit: Math.min(Math.max(Number(params.limit || 24), 1), 100),
     });
 
-    return result.products
+    return rows.map(toProductPublicDto)
       .filter((product) => {
         if (
           product.type !== PRODUCT_TYPE.COUPON ||
@@ -658,7 +684,14 @@ export const productService = {
           return false;
         }
       })
-      .map(toProductVoucherCatalogDto);
+      .map((product) => ({
+        ...toProductVoucherCatalogDto(product),
+        imageSrc: resolvePublicVoucherImageSrc({
+          tenantId: params.tenantId,
+          imageSrc: product.imageSrc,
+          voucherDesign: product.voucherDesign,
+        }),
+      }));
   },
 
   async getPublicProduct(params: {

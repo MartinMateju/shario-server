@@ -57,6 +57,7 @@ import UserModel from "@/modules/user/user.model.js";
 import { WORKSPACE_PERMISSION } from "@/modules/tenant-access/tenant-access.permissions.js";
 import { registerWorkspaceNotificationPublisher } from "@/modules/workspace-notifications/workspace-notification.bootstrap.js";
 import { startWorkerOperationalTelemetry } from "@/infrastructure/queues/worker-operational-telemetry.js";
+import { publishWorkerHeartbeat } from "@/infrastructure/operations/worker-heartbeats.js";
 import { emitWorkspaceNotificationEvent } from "@/modules/workspace-notifications/workspace-notification.events.js";
 
 const normalizeEmail = (value: unknown): string =>
@@ -435,6 +436,26 @@ const processCommunicationEmailJobAttempt = async (
     );
   }
 
+  const maxAttempts = getCommunicationEmailAttemptLimit(
+    log,
+    Math.max(
+      1,
+      Number(process.env.COMMUNICATION_EMAIL_MAX_DELIVERY_ATTEMPTS || 6),
+    ),
+  );
+  if (Number(log.attempts || 0) >= maxAttempts) {
+    const marked = await communicationEmailLogRepository.markFailed(
+      tenantId,
+      emailLogId,
+      "Automation email delivery attempts exhausted.",
+      claimToken,
+      true,
+      { retryable: false },
+    );
+    if (marked) emitTerminalCommunicationEmailFailure({ tenantId, emailLogId });
+    return { terminalFailure: marked, reason: "delivery_attempts_exhausted" };
+  }
+
   const tenant = await TenantModel.findOne({
     _id: tenantId,
     status: "active",
@@ -725,12 +746,16 @@ const processCommunicationEmailJobAttempt = async (
     const providerOutcomeKnownNotSent =
       error?.safeToRetry === true || error?.deliveryOutcome === "not_sent";
     if (providerOutcomeKnownNotSent) {
+      const retryable =
+        error?.permanent !== true &&
+        Number(log.attempts || 0) + 1 < maxAttempts;
       const failed = await communicationEmailLogRepository.markFailed(
         tenantId,
         emailLogId,
         error instanceof Error ? error.message : "Unknown email sending error.",
         claimToken,
         true,
+        { retryable },
       );
       if (!failed) {
         await reconcileCommunicationEmailAllowanceIfConnected({
@@ -740,6 +765,13 @@ const processCommunicationEmailJobAttempt = async (
       }
       if (allowanceReservationId) {
         await releaseCommunicationEmailAllowance(allowanceReservationId);
+      }
+      if (!retryable) {
+        emitTerminalCommunicationEmailFailure({ tenantId, emailLogId });
+        return {
+          terminalFailure: true,
+          reason: "permanent_or_exhausted_failure",
+        };
       }
       throw error;
     }
@@ -904,7 +936,10 @@ export const startCommunicationEmailWorker = async ({
     role: "communication-email",
     queueName: communicationEmailQueueName,
     queue: communicationEmailQueue,
-    emit: (sample) => logger.info(sample, "Worker operational sample."),
+    emit: (sample) => {
+      logger.info(sample, "Worker operational sample.");
+      publishWorkerHeartbeat(sample);
+    },
   });
   const recoveryTimer = setInterval(
     () => void runRecovery(),

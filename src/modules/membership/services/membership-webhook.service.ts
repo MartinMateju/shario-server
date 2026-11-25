@@ -1,3 +1,4 @@
+import { membershipPaymentHasRefund } from "@/modules/tenant-payments/services/payment-refund-reconciliation.service.js";
 import { randomUUID } from "node:crypto";
 import mongoose from "mongoose";
 import type Stripe from "stripe";
@@ -277,6 +278,9 @@ export const applyPaymentConfirmed = async (
         invoice: invoiceId, source: { id: event.id, created: event.created } });
     }
   }
+  // Mongo may retry after the invoice insert rolls back. Retaining the fetched
+  // provider object must not suppress materialization on the next attempt.
+  const reconciliationNeedsInvoiceSync = !invoice && event.id.startsWith("reconcile:");
   const session = await mongoose.startSession();
   try {
     await session.withTransaction(async () => {
@@ -351,17 +355,24 @@ export const applyPaymentConfirmed = async (
           await current.save({ session });
           return;
         }
-        if (!invoice && event.id.startsWith("reconcile:")) {
+        if (reconciliationNeedsInvoiceSync) {
           const latestInvoiceId = typeof subscription.latest_invoice === "string"
             ? subscription.latest_invoice : subscription.latest_invoice?.id;
           if (!latestInvoiceId) return;
           invoice = await syncMembershipInvoice({ membership: current, connectedAccountId: accountId,
-            invoice: latestInvoiceId, source: { id: event.id, created: event.created } });
+            invoice: invoice?.id === latestInvoiceId ? invoice : latestInvoiceId, source: { id: event.id, created: event.created }, session });
           // Active/trialing subscription status alone does not prove that the
           // period was paid. Reconciliation has the same proof requirement.
           if (invoice.status !== "paid") return;
         }
         if (!invoice) throw new Error("Recurring membership payment is missing its paid invoice.");
+        if (await membershipPaymentHasRefund({ tenantId: String(current.tenant), membershipId: String(current._id), accountId,
+          invoiceId: invoice?.id, paymentIntentId: typeof invoice?.payment_intent === "string" ? invoice.payment_intent : invoice?.payment_intent?.id || (typeof object.payment_intent === "string" ? object.payment_intent : object.payment_intent?.id), session })) {
+          // The refund is financial fact; granting benefits is a staff decision.
+          // Touch the membership so concurrent reconciliation retries atomically.
+          await UserMembershipModel.updateOne({ _id: current._id }, { $inc: { refundReconciliationRevision: 1 } }, { session });
+          return;
+        }
         period = periodFromPaidMembershipInvoice(invoice, subscription.id);
         // An older payment cannot rewind the paid period or replenish a newer
         // allowance after the provider has moved to the next billing period.
@@ -378,6 +389,13 @@ export const applyPaymentConfirmed = async (
         current.cancelScheduledAt = subscription.cancel_at_period_end ? new Date() : null;
         current.autoRenew = !subscription.cancel_at_period_end;
       } else {
+        if (await membershipPaymentHasRefund({ tenantId: String(current.tenant), membershipId: String(current._id), accountId,
+          invoiceId: invoice?.id, paymentIntentId: typeof invoice?.payment_intent === "string" ? invoice.payment_intent : invoice?.payment_intent?.id || (typeof object.payment_intent === "string" ? object.payment_intent : object.payment_intent?.id), session })) {
+          // The refund is financial fact; granting benefits is a staff decision.
+          // Touch the membership so concurrent reconciliation retries atomically.
+          await UserMembershipModel.updateOne({ _id: current._id }, { $inc: { refundReconciliationRevision: 1 } }, { session });
+          return;
+        }
         // Replays reuse the established fixed period. On first confirmation,
         // start the sold duration at payment time rather than Session creation.
         period = fixedPeriodFromPaymentConfirmation({

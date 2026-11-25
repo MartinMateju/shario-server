@@ -1,6 +1,7 @@
 import type { Response } from "express";
 
 import type { AuthenticatedRequest } from "@/modules/auth/auth.types.js";
+import { resolveAuthRequestContext } from "@/modules/auth/auth-first-party-proxy.js";
 import {
   getAuthenticatedUserId,
   getRefreshCookieCleanupOptions,
@@ -61,13 +62,16 @@ export const updateCustomerPreferences = asyncHandler(
 
 export const updateAccountPassword = asyncHandler(
   async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    const context = await resolveAuthRequestContext(req);
     await updateCurrentAccountPassword({
       tenantId: requireTenantId(req),
       userId: getAuthenticatedUserId(req),
       input: accountPasswordSchema.parse(req.body),
     });
 
-    for (const options of getRefreshCookieCleanupOptions(req.get("origin"))) {
+    for (const options of getRefreshCookieCleanupOptions(context.origin, {
+      firstPartyProxy: context.firstPartyProxy,
+    })) {
       res.clearCookie(REFRESH_TOKEN_COOKIE_NAME, options);
       res.clearCookie(CUSTOMER_REFRESH_TOKEN_COOKIE_NAME, options);
     }

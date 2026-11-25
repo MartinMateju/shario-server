@@ -31,7 +31,7 @@ const kpiRows = (overview: any) =>
           : "count";
     return csvRow([
       "summary",
-      metric,
+      metric === "netSales" ? "cashReceived" : metric,
       value.value,
       value.previous,
       value.changePercent,
@@ -50,11 +50,7 @@ const metadataRows = (overview: any) => {
       "comparisonPeriodFrom",
       metadata.comparisonPeriod?.from,
     ]),
-    csvRow([
-      "metadata",
-      "comparisonPeriodTo",
-      metadata.comparisonPeriod?.to,
-    ]),
+    csvRow(["metadata", "comparisonPeriodTo", metadata.comparisonPeriod?.to]),
     csvRow(["metadata", "timezone", metadata.timezone]),
     csvRow(["metadata", "currency", metadata.currency]),
     csvRow([
@@ -64,6 +60,14 @@ const metadataRows = (overview: any) => {
     ]),
     csvRow(["metadata", "granularity", metadata.granularity]),
     csvRow(["metadata", "generatedAt", metadata.generatedAt]),
+    csvRow(["metadata", "moneyBasis", metadata.moneyBasis]),
+    csvRow(["metadata", "refundBasis", metadata.refundBasis]),
+    csvRow(["metadata", "cashAsOf", metadata.cashAsOf]),
+    csvRow([
+      "metadata",
+      "moneyBasisExplanation",
+      metadata.moneyBasisExplanation,
+    ]),
   ];
 };
 
@@ -81,63 +85,76 @@ const limitationRows = (section: string, limitations: unknown) =>
 const salesRows = (overview: any): string[] => {
   const sales = overview.sales;
   if (!sales) return unavailableRows("sales");
-  const currencyUnit = `${sales.currency || overview.metadata?.currency || ""} minor`;
+  const code = sales.currency || overview.metadata?.currency || "";
   const rows = [
     csvRow(["sales", "metric", "value", "unit"]),
-    ...[
-      ["grossSalesMinor", sales.grossSalesMinor, currencyUnit],
-      ["discountsMinor", sales.discountsMinor, currencyUnit],
-      ["taxMinor", sales.taxMinor, currencyUnit],
-      ["netSalesMinor", sales.netSalesMinor, currencyUnit],
-      ["orders", sales.orders, "count"],
-      ["averageOrderValueMinor", sales.averageOrderValueMinor, currencyUnit],
-      ["refundsMinor", sales.refundsMinor, currencyUnit],
-    ].map(([metric, value, unit]) =>
-      csvRow(["sales", metric, value, unit]),
-    ),
+    csvRow([
+      "sales",
+      "cashReceivedMinor",
+      sales.cashReceivedMinor ?? sales.netSalesMinor,
+      `${code} minor`,
+    ]),
+    csvRow([
+      "sales",
+      "paymentCount",
+      sales.paymentCount ?? sales.orders,
+      "count",
+    ]),
+    csvRow([
+      "sales",
+      "averagePaymentMinor",
+      sales.averageOrderValueMinor,
+      `${code} minor`,
+    ]),
     csvRow([
       "sales.totalsByCurrency",
       "currency",
-      "grossSalesMinor",
-      "discountsMinor",
-      "taxMinor",
-      "netSalesMinor",
-      "paidAmountMinor",
-      "orders",
+      "cashReceivedMinor",
+      "paymentCount",
     ]),
     ...(sales.totalsByCurrency ?? []).map((entry: any) =>
       csvRow([
         "sales.totalsByCurrency",
         entry.currency,
-        entry.grossSalesMinor,
-        entry.discountsMinor,
-        entry.taxMinor,
-        entry.netSalesMinor,
-        entry.paidAmountMinor,
+        entry.cashReceivedMinor ?? entry.netSalesMinor,
         entry.orders,
       ]),
     ),
-    csvRow(["sales.paymentMethods", "method", "amountMinor", "currency"]),
+    csvRow(["sales.paymentMethods", "source", "amountMinor", "currency"]),
     ...(sales.paymentMethods ?? []).map((entry: any) =>
+      csvRow(["sales.paymentMethods", entry.method, entry.amountMinor, code]),
+    ),
+    csvRow([
+      "sales.monthlyRanking",
+      "month",
+      "cashReceivedMinor",
+      "paymentCount",
+      "completeMonth",
+      "dataComplete",
+      "currency",
+    ]),
+    ...(sales.monthlyRanking ?? []).map((entry: any) =>
       csvRow([
-        "sales.paymentMethods",
-        entry.method,
-        entry.amountMinor,
-        sales.currency,
+        "sales.monthlyRanking",
+        entry.month,
+        entry.cashReceivedMinor,
+        entry.paymentCount,
+        entry.completeMonth,
+        entry.dataComplete,
+        code,
       ]),
     ),
   ];
-  if (sales.topProducts === null) {
+  if (sales.topProducts === null)
     rows.push(...unavailableRows("sales.topProducts"));
-  } else {
+  else
     rows.push(
       csvRow([
         "sales.topProducts",
         "productId",
         "name",
         "quantity",
-        "netSalesMinor",
-        "grossSalesMinor",
+        "cashReceivedMinor",
         "currency",
       ]),
       ...(sales.topProducts ?? []).map((entry: any) =>
@@ -146,13 +163,11 @@ const salesRows = (overview: any): string[] => {
           entry.productId,
           entry.name,
           entry.quantity,
-          entry.netSalesMinor,
-          entry.grossSalesMinor,
-          sales.currency,
+          entry.cashReceivedMinor ?? entry.netSalesMinor,
+          code,
         ]),
       ),
     );
-  }
   rows.push(...limitationRows("sales", sales.limitations));
   return rows;
 };
@@ -166,20 +181,12 @@ const bookingRows = (overview: any): string[] => {
       ["total", bookings.total, "count"],
       ["participants", bookings.participants, "count"],
       ["cancellations", bookings.cancellations, "count"],
-      ["noShows", bookings.noShows, "count"],
       ["bookedHours", bookings.bookedHours, "hours"],
       ["utilizationPercent", bookings.utilizationPercent, "percent"],
-    ].map(([metric, value, unit]) =>
-      csvRow(["bookings", metric, value, unit]),
-    ),
+    ].map(([metric, value, unit]) => csvRow(["bookings", metric, value, unit])),
     csvRow(["bookings.types", "type", "count", "participants"]),
     ...(bookings.bookingTypes ?? []).map((entry: any) =>
-      csvRow([
-        "bookings.types",
-        entry.type,
-        entry.count,
-        entry.participants,
-      ]),
+      csvRow(["bookings.types", entry.type, entry.count, entry.participants]),
     ),
   ];
   if (bookings.courseFill === null) {
@@ -328,14 +335,21 @@ export const buildReportCsv = (overview: any): string => {
   const rows = [
     ...metadataRows(overview),
     "",
-    csvRow(["section", "metric", "current", "previous", "changePercent", "unit"]),
+    csvRow([
+      "section",
+      "metric",
+      "current",
+      "previous",
+      "changePercent",
+      "unit",
+    ]),
     ...kpiRows(overview),
     "",
     csvRow([
       "timeSeries",
       "periodStart",
       "periodEnd",
-      "netSalesMinor",
+      "cashReceivedMinor",
       "bookings",
       "participants",
       "utilizationPercent",

@@ -19,6 +19,7 @@ vi.mock("@/modules/reports/reports.controller.js", () => ({
   getReportOverview: mocks.handler,
   exportReportCsv: mocks.handler,
 }));
+vi.mock("@/modules/reports/reports.customer-controller.js", () => ({ getReportCustomers: mocks.handler, exportReportCustomersCsv: mocks.handler }));
 
 import reportsRouter from "@/modules/reports/reports.routes.js";
 import { WORKSPACE_PERMISSION } from "@/modules/tenant-access/tenant-access.permissions.js";
@@ -34,6 +35,10 @@ const permissionsFor = (path: string, method: string): string[] => {
 };
 
 describe("report route permissions", () => {
+  it("requires customer visibility for segmentation and export permission for its CSV", () => {
+    expect(permissionsFor("/customers", "get")).toEqual([WORKSPACE_PERMISSION.REPORTS_VIEW, WORKSPACE_PERMISSION.CUSTOMERS_VIEW]);
+    expect(permissionsFor("/customers/export.csv", "get")).toEqual([WORKSPACE_PERMISSION.REPORTS_VIEW, WORKSPACE_PERMISSION.CUSTOMERS_VIEW, WORKSPACE_PERMISSION.REPORTS_EXPORT]);
+  });
   it("requires active workspace access for the router", () => {
     expect(
       (reportsRouter.stack as any[]).some(

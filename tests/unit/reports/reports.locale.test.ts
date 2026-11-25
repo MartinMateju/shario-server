@@ -33,7 +33,7 @@ describe("report presentation language", () => {
         ...facts,
         locale: resolveReportLocale("cs-CZ", "en"),
       }).highlights[0],
-    ).toMatch(/^Tržby /);
+    ).toMatch(/^Přijaté platby /);
     expect(resolveReportLocale(undefined, "cz", "en")).toBe("cs");
     expect(resolveReportLocale(undefined, undefined, "en")).toBe("en");
     expect(reportQuerySchema.parse({})).not.toHaveProperty("locale");

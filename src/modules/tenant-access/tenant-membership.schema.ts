@@ -51,6 +51,7 @@ const workspaceProfileSchema = new Schema(
 
 const workspaceNotificationPreferencesSchema = new Schema(
   {
+    bookingCreated: { type: Boolean, default: false },
     bookingAssigned: { type: Boolean, default: true },
     bookingCancelled: { type: Boolean, default: true },
     taskAssigned: { type: Boolean, default: true },
@@ -177,6 +178,14 @@ const workspacePreferencesSchema = new Schema(
       maxlength: 160,
     },
     overviewLaunchCenterDismissed: {
+      type: Boolean,
+      default: false,
+    },
+    emailReadyBannerDismissed: {
+      type: Boolean,
+      default: false,
+    },
+    overviewAttentionDismissed: {
       type: Boolean,
       default: false,
     },

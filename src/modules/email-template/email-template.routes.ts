@@ -12,6 +12,11 @@ import {
   toggleEmailTemplateActive,
   updateEmailTemplate,
 } from "./controllers/email-template.controller.js";
+import {
+  deleteDoorAccessEmailTemplate,
+  getDoorAccessEmailTemplates,
+  patchDoorAccessEmailTemplate,
+} from "./controllers/door-access-email-template.controller.js";
 
 const router = express.Router();
 
@@ -24,12 +29,35 @@ const manageCommunications = requirePermission(
   WORKSPACE_PERMISSION.COMMUNICATIONS_MANAGE,
 );
 
-router.route("/").get(viewCommunications, getEmailTemplates).post(
-  manageCommunications,
-  createEmailTemplate,
+router.get(
+  "/door-access",
+  viewCommunications,
+  requirePermission(WORKSPACE_PERMISSION.ACCESS_CODES_VIEW),
+  getDoorAccessEmailTemplates,
 );
+router
+  .route("/door-access/:locationId")
+  .patch(
+    manageCommunications,
+    requirePermission(WORKSPACE_PERMISSION.ACCESS_CODES_MANAGE),
+    patchDoorAccessEmailTemplate,
+  )
+  .delete(
+    manageCommunications,
+    requirePermission(WORKSPACE_PERMISSION.ACCESS_CODES_MANAGE),
+    deleteDoorAccessEmailTemplate,
+  );
 
-router.patch("/:id/toggle-active", manageCommunications, toggleEmailTemplateActive);
+router
+  .route("/")
+  .get(viewCommunications, getEmailTemplates)
+  .post(manageCommunications, createEmailTemplate);
+
+router.patch(
+  "/:id/toggle-active",
+  manageCommunications,
+  toggleEmailTemplateActive,
+);
 router.patch("/:id/set-default", manageCommunications, setDefaultEmailTemplate);
 
 router

@@ -88,6 +88,10 @@ secret to `stripe listen` as an argument.
 Subscribe the Connect destination to these connected-account events:
 
 - `account.updated`
+- `charge.refunded`
+- `refund.created`
+- `refund.updated`
+- `refund.failed`
 - `checkout.session.completed`
 - `checkout.session.async_payment_succeeded`
 - `checkout.session.async_payment_failed`
@@ -114,18 +118,44 @@ metadata. A Checkout completion without `payment_status=paid` never activates a
 membership. Event claims are durable/leased and published plan terms are read
 from the stored membership snapshot, not mutable Stripe metadata.
 
-The three refund events reconcile supported booking/checkout refunds. Membership
-V1 deliberately does not automatically apply refund or dispute events to membership
-entitlements. Refunding a fixed or recurring membership charge in Stripe
-does not alter the local membership, its Subscription, or its entitlements. The
-operator must also cancel the membership through Skab (which cancels/schedules
-the connected-account Subscription where applicable) and use an audited benefit
-adjustment when the chosen refund policy requires it. Partial refunds are always
-manual because V1 has no safe generic mapping from refunded money to consumed
-benefits. Disputes require operational review and manual cancellation/adjustment
-when access should be revoked. Add explicit event subscriptions, connected-
-account retrieval, idempotency, and ledger semantics before automating either
-workflow.
+Dashboard refunds are recorded for ordinary booking/credit orders and fixed or
+recurring membership payments. Provider reads use the existing pinned
+`2023-10-16` API version and the connected-account request header. Metadata is
+only a lookup hint; saved Checkout/PaymentIntent or invoice/subscription links
+prove the association. Refund objects, including paginated results, determine
+succeeded, pending and failed amounts. Replays read current provider state and
+share a payment lease, so an older event does not restore an older status.
+
+The chosen policy is **record the refund, review benefit changes**. Reconciliation
+never creates another provider refund, credits a wallet, cancels a booking or
+membership, deducts purchased credit, or prorates benefits. Staff review the
+unresolved item in Payments, make any required audited adjustment separately,
+and record a note plus evidence (including an explicit decision to retain
+benefits). Review requires all-location access and `payments.refund`; listing
+requires `payments.view`. Acknowledgment is versioned, retains actor/history,
+and reopens when Stripe's refund state changes. It does not enable a second
+automatic refund. Unknown/mismatched mappings cannot be acknowledged until
+repaired and reconciled.
+
+Order and membership invoice reads include refund totals. Order sales amounts
+deduct successful provider refunds once, including when a managed original-
+payment refund already appears in the local ledger. Pending and failed amounts
+are shown separately. Ambiguous allocations remain unavailable instead of
+reporting guessed revenue. A refund observed before payment fulfillment blocks
+new booking/credit/entitlement benefits and confirmation messages pending review;
+already fulfilled benefits remain unchanged. Voucher purchases retain their
+dedicated refund handler.
+
+**Deployment precondition:** subscribe the connected-account destination to all
+four refund events above, retain the existing checkout/membership events, and
+verify delivery in Stripe test mode before relying on production coverage. This
+change does not modify Stripe Dashboard configuration. The first reconciliation
+or review prepares only its three new collections/indexes; database privileges
+must permit their creation. No existing indexes are dropped or synchronized.
+
+See [refund operator runbook](stripe-refund-review.md) for review, historical
+replay, test evidence and rollout limitations. Disputes remain operational
+review; a refund does not cancel a Stripe Subscription.
 
 ### Draining pre-Connect platform Checkout Sessions
 

@@ -379,10 +379,10 @@ export const publishCustomerMembershipNotification = ({
 
 const WAITLIST_COPY = {
   joined: [
-    "You're on the waitlist",
-    "Jste na čekací listině",
-    "Your place on the waitlist is confirmed.",
-    "Vaše místo na čekací listině je potvrzeno.",
+    "You're on the waiting list",
+    "Jste na waiting listu",
+    "Your place on the waiting list is confirmed.",
+    "Vaše místo na waiting listu je potvrzeno.",
   ],
   offered: [
     "A place is available",
@@ -391,34 +391,34 @@ const WAITLIST_COPY = {
     "Místo je pro vás dočasně rezervováno. Dokončete objednávku před vypršením nabídky.",
   ],
   expired: [
-    "Waitlist offer expired",
-    "Nabídka z čekací listiny vypršela",
+    "Waiting list offer expired",
+    "Nabídka z waiting listu vypršela",
     "The offer window ended and the place was released.",
     "Čas nabídky vypršel a místo bylo uvolněno.",
   ],
   withdrawn: [
-    "Waitlist withdrawal confirmed",
-    "Odhlášení z čekací listiny potvrzeno",
-    "You have left the waitlist.",
-    "Byli jste odhlášeni z čekací listiny.",
+    "Waiting list withdrawal confirmed",
+    "Odhlášení z waiting listu potvrzeno",
+    "You have left the waiting list.",
+    "Byli jste odhlášeni z waiting listu.",
   ],
   cancelled: [
-    "Waitlist entry cancelled",
-    "Čekací listina zrušena",
-    "The studio cancelled this waitlist entry.",
-    "Studio zrušilo tuto položku čekací listiny.",
+    "Waiting list entry cancelled",
+    "Záznam na waiting listu zrušen",
+    "The studio cancelled this waiting list entry.",
+    "Studio zrušilo tento záznam na waiting listu.",
   ],
   confirmed: [
     "Place confirmed",
     "Místo potvrzeno",
-    "Your waitlist place was converted into a confirmed booking.",
-    "Vaše místo z čekací listiny bylo převedeno na potvrzenou rezervaci.",
+    "Your waiting list place was converted into a confirmed booking.",
+    "Vaše místo z waiting listu bylo převedeno na potvrzenou rezervaci.",
   ],
   refunded: [
-    "Waitlist payment refunded",
-    "Platba z čekací listiny vrácena",
-    "Your late waitlist payment was refunded to the original payment method.",
-    "Pozdní platba z čekací listiny byla vrácena původním způsobem platby.",
+    "Waiting list payment refunded",
+    "Platba z waiting listu vrácena",
+    "Your late waiting list payment was refunded to the original payment method.",
+    "Pozdní platba z waiting listu byla vrácena původním způsobem platby.",
   ],
 } as const;
 

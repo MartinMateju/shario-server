@@ -15,6 +15,11 @@ vi.mock("@/modules/location/location.repository.js", () => ({
 vi.mock("@/modules/booking/booking.repository.js", () => ({
   createBookingRepository: vi.fn(() => ({ insertMany: mocks.insertMany })),
 }));
+vi.mock("@/modules/booking/services/booking.session-insert.service.js", () => ({
+  insertCalendarSessionsWithConflictCheck: vi.fn(({ records }) =>
+    mocks.insertMany(records),
+  ),
+}));
 
 import { createCourseBookingRecords } from "@/modules/booking/services/booking.course.service.js";
 import { createProductRepository } from "@/modules/product/product.repository.js";

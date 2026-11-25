@@ -1,5 +1,6 @@
 import mongoose from "mongoose";
 import { z } from "zod";
+import { partialWithoutDefaults } from "@/shared/validation/partialWithoutDefaults.js";
 
 import {
   ROLLOUT_ELIGIBLE_APP_LOCALES,
@@ -538,7 +539,7 @@ export const knowledgeArticleSchema = knowledgeArticleFields.superRefine(
   },
 );
 
-export const updateKnowledgeArticleSchema = knowledgeArticleFields.partial();
+export const updateKnowledgeArticleSchema = partialWithoutDefaults(knowledgeArticleFields);
 
 export const listKnowledgeSchema = z.object({
   search: z.string().trim().max(200).default(""),

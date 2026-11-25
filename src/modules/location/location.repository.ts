@@ -160,7 +160,7 @@ export const locationRepository = {
     // private instructions that the editor did not submit.
     const accessPatch = Object.fromEntries(
       Object.entries(access ?? {})
-        .filter(([, value]) => value !== undefined)
+        .filter(([key, value]) => key !== "emailTemplate" && value !== undefined)
         .map(([key, value]) => [`access.${key}`, value]),
     );
 

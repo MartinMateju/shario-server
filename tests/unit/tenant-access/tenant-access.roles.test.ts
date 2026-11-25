@@ -145,6 +145,7 @@ describe("workspace role catalogue", () => {
         defaultLandingPage: "/app",
         contextualGuides: {},
         notifications: {
+          bookingCreated: false,
           bookingAssigned: true,
           bookingCancelled: true,
           taskAssigned: true,

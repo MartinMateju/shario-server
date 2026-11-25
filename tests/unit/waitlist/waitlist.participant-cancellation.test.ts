@@ -1,5 +1,10 @@
+// The new provider-refund lock is covered by real Mongo integration tests.
+vi.mock("@/modules/tenant-payments/services/payment-refund-reconciliation.service.js", () => ({
+  assertOrdersHaveNoProviderRefund: vi.fn().mockResolvedValue(undefined),
+}));
 import mongoose from "mongoose";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+vi.mock("@/modules/booking/booking-cancellation-event.model.js", () => ({ recordBookingCancellation: vi.fn().mockResolvedValue(undefined) }));
 
 const mocks = vi.hoisted(() => ({
   bookingFindOne: vi.fn(),

@@ -196,6 +196,7 @@ import {
   startSetupPractice,
   unpublishStudio,
 } from "@/modules/setup-center/setup-center.service.js";
+import { legacyPracticeFingerprint } from "@/modules/setup-center/setup-practice-fingerprint.js";
 
 const TENANT_ID = "507f1f77bcf86cd799439011";
 const USER_ID = "507f1f77bcf86cd799439012";
@@ -422,6 +423,12 @@ const configureStateUpdates = () => {
       const previousFingerprint =
         filter?.["practiceConfirmation.readinessFingerprint"];
       if (
+        typeof previousFingerprint === "string" &&
+        stateDocument.practiceConfirmation?.readinessFingerprint !==
+          previousFingerprint
+      )
+        return null;
+      if (
         previousFingerprint?.$ne &&
         stateDocument.practiceConfirmation?.readinessFingerprint ===
           previousFingerprint.$ne
@@ -512,6 +519,12 @@ const configureStateUpdates = () => {
         switch (path) {
           case "practiceConfirmation":
             stateDocument.practiceConfirmation = value;
+            break;
+          case "practiceConfirmation.readinessFingerprint":
+            stateDocument.practiceConfirmation.readinessFingerprint = value;
+            break;
+          case "practice.readinessFingerprint":
+            stateDocument.practice.readinessFingerprint = value;
             break;
           case "practice":
             stateDocument.practice = value;
@@ -655,7 +668,7 @@ describe("Setup Center Practice Mode isolation and transitions", () => {
     mocks.kilnCount.mockResolvedValue(0);
     mocks.inventoryItemCount.mockResolvedValue(0);
     mocks.bookingFindOne.mockReturnValue(
-      selectedLean({
+      selectedSortedLean({
         bookingProduct: PRODUCT_ID,
         location: LOCATION_ID,
       }),
@@ -1685,6 +1698,68 @@ describe("Setup Center Practice Mode isolation and transitions", () => {
     expect(mocks.auditCreate).toHaveBeenCalledOnce();
   });
 
+  it.each(["clear", "new confirmation"])(
+    "does not overwrite a concurrent %s during a legacy evidence upgrade",
+    async (race) => {
+      stateDocument.publication.status = SETUP_PUBLICATION_STATUS.LIVE;
+      const before = await buildSetupCenterSnapshot({
+        tenantId: TENANT_ID,
+        actorUserId: USER_ID,
+      });
+      const oldEvidence = {
+        confirmedAt: NOW,
+        confirmedBy: USER_ID,
+        readinessFingerprint: legacyPracticeFingerprint({
+          product: productFixture,
+          location: locationFixture,
+        }),
+      };
+      const newEvidence =
+        race === "clear"
+          ? null
+          : {
+              confirmedAt: new Date("2026-08-01T09:00:00Z"),
+              confirmedBy: OTHER_USER_ID,
+              readinessFingerprint: before.diagnostics.readinessFingerprint,
+            };
+      stateDocument.practiceConfirmation = oldEvidence;
+      mocks.stateFindOneAndUpdate.mockImplementationOnce(async () => {
+        stateDocument.practiceConfirmation = newEvidence;
+        return null;
+      });
+
+      const reloaded = await buildSetupCenterSnapshot({
+        tenantId: TENANT_ID,
+        actorUserId: USER_ID,
+      });
+      expect(stateDocument.practiceConfirmation).toEqual(newEvidence);
+      expect(reloaded.launchReview.testBooking.complete).toBe(race !== "clear");
+      if (newEvidence)
+        expect(reloaded.practice.manualConfirmation).toEqual({
+          confirmedAt: newEvidence.confirmedAt,
+          confirmedBy: newEvidence.confirmedBy,
+          current: true,
+        });
+      else expect(reloaded.practice.manualConfirmation).toBeNull();
+      expect(mocks.stateFindOneAndUpdate).toHaveBeenCalledWith(
+        {
+          tenant: TENANT_ID,
+          "practiceConfirmation.readinessFingerprint":
+            oldEvidence.readinessFingerprint,
+          "practiceConfirmation.confirmedAt": oldEvidence.confirmedAt,
+        },
+        {
+          $set: {
+            "practiceConfirmation.readinessFingerprint":
+              before.diagnostics.readinessFingerprint,
+          },
+        },
+        { returnDocument: "after", runValidators: true },
+      );
+      expect(mocks.auditCreate).not.toHaveBeenCalled();
+    },
+  );
+
   it.each(["product", "location"])(
     "requires explicit reconfirmation after a %s configuration change",
     async (entity) => {
@@ -1699,14 +1774,20 @@ describe("Setup Center Practice Mode isolation and transitions", () => {
         expectedReadinessFingerprint: before.diagnostics.readinessFingerprint,
       };
       await confirmSetupPractice(input);
-      const changedAt = new Date("2026-08-01T09:00:00Z");
       if (entity === "product")
         mocks.productFind.mockReturnValue(
-          selectedSortedLean([{ ...productFixture, updatedAt: changedAt }]),
+          selectedSortedLean([
+            { ...productFixture, price: productFixture.price + 100 },
+          ]),
         );
       else
         mocks.locationFind.mockReturnValue(
-          selectedSortedLean([{ ...locationFixture, updatedAt: changedAt }]),
+          selectedSortedLean([
+            {
+              ...locationFixture,
+              booking: { ...locationFixture.booking, globalCapacity: 12 },
+            },
+          ]),
         );
       const stale = await buildSetupCenterSnapshot({
         tenantId: TENANT_ID,
@@ -2134,7 +2215,7 @@ describe("Setup Center Practice Mode isolation and transitions", () => {
   });
 
   it("guides a valid course to the modern session composer instead of creating another product", async () => {
-    mocks.bookingFindOne.mockReturnValue(selectedLean(null));
+    mocks.bookingFindOne.mockReturnValue(selectedSortedLean(null));
 
     const snapshot = await buildSetupCenterSnapshot({
       tenantId: TENANT_ID,
@@ -2211,7 +2292,7 @@ describe("Setup Center Practice Mode isolation and transitions", () => {
           },
         ]),
       );
-      mocks.bookingFindOne.mockReturnValue(selectedLean(null));
+      mocks.bookingFindOne.mockReturnValue(selectedSortedLean(null));
 
       const snapshot = await buildSetupCenterSnapshot({
         tenantId: TENANT_ID,
@@ -2296,7 +2377,7 @@ describe("Setup Center Practice Mode isolation and transitions", () => {
       ]),
     );
     mocks.bookingFindOne.mockReturnValue(
-      selectedLean({
+      selectedSortedLean({
         bookingProduct: SECOND_PRODUCT_ID,
         location: SECOND_LOCATION_ID,
       }),
@@ -2779,7 +2860,7 @@ describe("Setup Center publication safety", () => {
     mocks.kilnCount.mockResolvedValue(0);
     mocks.inventoryItemCount.mockResolvedValue(0);
     mocks.bookingFindOne.mockReturnValue(
-      selectedLean({
+      selectedSortedLean({
         bookingProduct: PRODUCT_ID,
         location: LOCATION_ID,
       }),

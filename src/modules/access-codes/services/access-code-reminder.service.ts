@@ -1,6 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
 
-import { formatDateTimeRange } from "@/modules/access-codes/access-code.utils.js";
+import {
+  buildCourseReminderCopy,
+  resolveCourseReminderLocale,
+} from "@/modules/access-codes/services/course-reminder-copy.js";
 import {
   COURSE_REMINDER_DELIVERY_STATUS,
   type CourseReminderDeliveryStatus,
@@ -248,19 +251,19 @@ const resolveCurrentCourseReminderMail: ResolveCourseReminderMail = async (
     };
   }
 
-  const courseName = booking.bookingProduct?.name || "kurz keramiky";
-  const locationName = booking.location?.name || "Studio";
-  const timezone = booking.location?.booking?.timezone || "UTC";
-  const dateTime = formatDateTimeRange(
-    new Date(booking.start),
-    new Date(booking.end),
-    timezone,
-  );
+  const copy = buildCourseReminderCopy({
+    locale: await resolveCourseReminderLocale(booking.tenant),
+    courseName: booking.bookingProduct?.name,
+    locationName: booking.location?.name,
+    start: new Date(booking.start),
+    end: new Date(booking.end),
+    timezone: booking.location?.booking?.timezone || "UTC",
+  });
   return {
     mail: {
       recipientEmail: allowedUser.email,
-      subject: `Připomínka: ${courseName} už brzy`,
-      textContent: `Dobrý den,\n\npřipomínáme, že váš kurz ${courseName} začíná ${dateTime}.\n\n${locationName}`,
+      subject: copy.subject,
+      textContent: copy.textContent,
     },
     skipReason: "",
   };
@@ -565,16 +568,14 @@ export async function sendUpcomingCourseReminders(
       continue;
     }
 
-    const courseName = booking.bookingProduct?.name || "kurz keramiky";
-    const locationName = booking.location?.name || "Studio";
-    const timezone = booking.location?.booking?.timezone || "UTC";
-    const dateTime = formatDateTimeRange(
-      new Date(booking.start),
-      new Date(booking.end),
-      timezone,
-    );
-    const subject = `Připomínka: ${courseName} už brzy`;
-    const textContent = `Dobrý den,\n\npřipomínáme, že váš kurz ${courseName} začíná ${dateTime}.\n\n${locationName}`;
+    const { subject, textContent } = buildCourseReminderCopy({
+      locale: await resolveCourseReminderLocale(booking.tenant),
+      courseName: booking.bookingProduct?.name,
+      locationName: booking.location?.name,
+      start: new Date(booking.start),
+      end: new Date(booking.end),
+      timezone: booking.location?.booking?.timezone || "UTC",
+    });
     const idempotencyKeys: string[] = [];
 
     for (const user of allowedUsers) {

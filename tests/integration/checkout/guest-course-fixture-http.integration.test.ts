@@ -25,6 +25,7 @@ import { publicCommerceMutationLimiter, publicTenantLookupLimiter, resetPublicCo
 import { publicProductRouter } from "@/modules/product/routes/product.public.routes.js";
 import { publicTenantCommerceRouter } from "@/modules/checkout/checkout.public.routes.js";
 import { publicTenantRouter } from "@/modules/tenants/public-tenant.routes.js";
+import { publicMembershipRouter } from "@/modules/membership/routes/membership.routes.js";
 import { errorHandler } from "@/shared/http/errorHandler.js";
 
 describe("browser guest voucher fixture through public HTTP routes", () => {
@@ -34,7 +35,7 @@ describe("browser guest voucher fixture through public HTTP routes", () => {
   app.use(express.json());
   app.get("/probe/public-lookup", publicTenantLookupLimiter, (_req, res) => { res.sendStatus(200); });
   app.post("/probe/public-mutation", publicCommerceMutationLimiter, (_req, res) => { res.sendStatus(200); });
-  app.use("/public", publicProductRouter, publicTenantCommerceRouter, publicTenantRouter);
+  app.use("/public", publicTenantRouter, publicProductRouter, publicTenantCommerceRouter, publicMembershipRouter);
   beforeAll(async () => {
     vi.stubEnv("E2E_TEST_MODE", "true");
     vi.stubEnv("ACCESS_TOKEN_SECRET", "local-fixture-http-secret-".repeat(3));
@@ -76,6 +77,20 @@ describe("browser guest voucher fixture through public HTTP routes", () => {
     fixtures = reset.body;
     expect((await request(app).get("/probe/public-lookup")).status).toBe(200);
     expect((await request(app).post("/probe/public-mutation")).status).toBe(200);
+  });
+
+  it("serves the same published location and course data for initial rendering and later browser reads", async () => {
+    const path = `/public/tenants/${fixtures.tenants.alpha.slug}/products/courses`;
+    const { alpha, beta } = fixtures.locations;
+    const overview = await request(app).get(`${path}/overview`).query({ location: alpha.slug }).expect(200);
+    const locations = await request(app).get(`${path}/locations`).expect(200);
+    const products = await request(app).get(path).query({ locationId: alpha.id, page: 1, limit: 100 }).expect(200);
+    expect(overview.body).toEqual({ locations: locations.body.locations, locationId: alpha.id, products: products.body });
+    expect(overview.body.products).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: fixtures.products.alpha.id, nextSession: expect.objectContaining({ id: fixtures.courseSessions.alpha.id }) }),
+    ]));
+    const otherStudio = await request(app).get(`${path}/overview`).query({ location: beta.id }).expect(200);
+    expect(otherStudio.body).toEqual({ locations: locations.body.locations, locationId: "", products: [] });
   });
 
   it("quotes without reserving, fulfills without Stripe, replays and requires guest proof", async () => {
@@ -132,5 +147,57 @@ describe("browser guest voucher fixture through public HTTP routes", () => {
     const remaining = await request(app).post(`${base}/checkout/guest/voucher/quote`).send(quoteBody);
     expect(remaining.status, JSON.stringify(remaining.body)).toBe(200);
     expect(remaining.body).toMatchObject({ voucherAppliedMinor: 500, remainingToPayMinor: 4000 });
+  });
+
+  it("charges real catalogue routes once across commerce-router fallthrough, separately from configuration", async () => {
+    await resetPublicCommerceRateLimitsForE2E();
+    try {
+      const base = `/public/tenants/${fixtures.tenants.alpha.slug}`;
+      const config = await request(app).get(`${base}/config`).expect(200);
+      expect(config.headers["x-shario-public-lookup-budget"]).toBe("configuration");
+      expect(config.headers["ratelimit-remaining"]).toBe("119");
+      const courses = await request(app).get(`${base}/products/courses`).expect(200);
+      expect(courses.headers["ratelimit-limit"]).toBe("600");
+      expect(courses.headers["ratelimit-remaining"]).toBe("599");
+      // In production this route passes both the commerce router's .use()
+      // limiter and the membership router's own limiter.
+      const memberships = await request(app).get(`${base}/memberships`).expect(200);
+      expect(memberships.headers["x-shario-public-lookup-budget"]).toBe("catalogue");
+      expect(memberships.headers["ratelimit-remaining"]).toBe("598");
+      const nextConfig = await request(app).get(`${base}/config`).expect(200);
+      expect(nextConfig.headers["ratelimit-remaining"]).toBe("118");
+    } finally {
+      await resetPublicCommerceRateLimitsForE2E();
+    }
+  });
+
+  it("retains 120 sensitive lookups and 30 mutation attempts on the real public routes", async () => {
+    await resetPublicCommerceRateLimitsForE2E();
+    try {
+      const base = `/public/tenants/${fixtures.tenants.alpha.slug}`;
+      const order = `${base}/vouchers/orders/507f1f77bcf86cd799439099`;
+      // Missing access proofs must neither disclose an order nor send email.
+      for (let index = 0; index < 120; index += 1) {
+        await request(app).post(`${order}/status`).send({}).expect(404);
+      }
+      const limited = await request(app).post(`${order}/status`).send({}).expect(429);
+      expect(limited.body.code).toBe("PUBLIC_TENANT_LOOKUP_RATE_LIMITED");
+      expect(limited.headers["ratelimit-limit"]).toBe("120");
+      expect(limited.headers["x-shario-public-lookup-budget"]).toBe("lookup");
+      await request(app).get(`${base}/config`).expect(200);
+      await request(app).get(`${base}/products/courses`).expect(200);
+
+      await resetPublicCommerceRateLimitsForE2E();
+      for (let index = 0; index < 30; index += 1) {
+        await request(app).post(`${order}/resend`).send({}).expect(404);
+      }
+      const mutation = await request(app).post(`${order}/resend`).send({}).expect(429);
+      expect(mutation.body.code).toBe("PUBLIC_COMMERCE_RATE_LIMITED");
+      expect(mutation.headers["ratelimit-limit"]).toBe("30");
+      expect(mutation.headers["ratelimit-remaining"]).toBe("0");
+      await request(app).get(`${base}/config`).expect(200);
+    } finally {
+      await resetPublicCommerceRateLimitsForE2E();
+    }
   });
 });

@@ -58,15 +58,16 @@ migrations or due-age collection are introduced here.
    Check ambiguous/terminal application outcomes through the existing authorized
    application views. Do not infer successful delivery from a zero queue count,
    automatically replay ambiguous jobs, or page on every retained failed job.
-4. Configure an external log/metrics consumer and a named alert owner/destination
-   before treating this as active alerting. Missing-heartbeat detection must run
-   outside the monitored process. Current Render workspace notifications target
-   Email with Only failure notifications; that does not establish custom queue
-   or heartbeat alarms. Delivery and escalation remain untested.
-5. Once an owner and destination are approved, verify a synthetic monitoring
-   event reaches that destination without sending customer messages or inducing
-   a production outage. Retain receipt evidence. This increment does not connect
-   a provider, change notification channels, send a test or schedule monitoring.
+4. Follow [operational alert setup](operational-alerts.md) to activate the external
+   monitor. With `OPS_MONITOR_TOKEN` and a distinct environment namespace set,
+   these samples also publish bounded, sanitized Redis heartbeats for the private
+   health endpoint. The external workflow detects missing/stale samples and
+   notifies the configured owner at the `OPS_ALERT_TO` address. Render deployment
+   failure emails alone do not establish queue or heartbeat alarms.
+5. The operational alert record includes successful provider delivery and owner
+   inbox confirmation for a synthetic test. Production scheduling remains opt-in
+   until the reviewed code and configuration are deployed. Independent detection
+   of monitor/SMTP failure and a backup escalation route remain separate controls.
 
 Restore capability remains excluded from this task. This telemetry does not
 measure backups or recovery readiness.

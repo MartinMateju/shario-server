@@ -1,5 +1,7 @@
+import { serializeRefundSummary } from "@/modules/tenant-payments/payment-refund-summary.js";
 import { requireExpectedVoucherQuote } from "../checkout.voucher.validation.js";
 import { cancelVoucherCheckout } from "../services/checkout.voucher-session.service.js";
+import { cancelOpenStudioCardCheckout } from "../services/checkout.cancellation.service.js";
 import type { Response } from "express";
 import mongoose from "mongoose";
 
@@ -120,6 +122,19 @@ export const cancelVoucherPayment = async (
   res: Response,
 ) => {
   const result = await cancelVoucherCheckout({
+    tenantId: requireTenantId(req),
+    userId: getAuthenticatedUserId(req),
+    orderId: String(req.params.orderId || ""),
+  });
+  res.setHeader("Cache-Control", "private, no-store");
+  return res.status(200).json(result);
+};
+
+export const cancelCheckoutPayment = async (
+  req: CheckoutRequest,
+  res: Response,
+) => {
+  const result = await cancelOpenStudioCardCheckout({
     tenantId: requireTenantId(req),
     userId: getAuthenticatedUserId(req),
     orderId: String(req.params.orderId || ""),
@@ -518,7 +533,7 @@ export const getCheckoutOrderStatus = async (
     Number(order.creditPurchase?.amount || 0) > 0
       ? "credit-purchase"
       : "commerce";
-  const processing = status === "pending_order" && order.isPaid === true;
+  const processing = status === "pending_order" && order.isPaid === true && !order.refund;
 
   return res.status(200).json({
     orderId: String(order._id),
@@ -527,6 +542,9 @@ export const getCheckoutOrderStatus = async (
     terminal: status !== "pending_order",
     processing,
     orderType,
+    refund: serializeRefundSummary(order.refund),
+    refundReviewRequired: status === "pending_order" && Boolean(order.refund),
+    currency: order.currency,
   });
 };
 

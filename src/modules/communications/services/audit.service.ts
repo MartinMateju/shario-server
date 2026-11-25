@@ -42,8 +42,9 @@ export const recordCommunicationAudit = async ({
   ipAddress = "",
   userAgent = "",
   retentionDays = 1095,
-}: Record<string, any>) =>
-  CommunicationAuditModel.create({
+  session,
+}: Record<string, any>) => {
+  const input = {
     tenantId,
     actorType,
     actorId,
@@ -59,4 +60,10 @@ export const recordCommunicationAudit = async ({
     ipAddress,
     userAgent,
     expiresAt: new Date(Date.now() + Math.max(30, retentionDays) * 86_400_000),
-  });
+  };
+  if (session) {
+    const [audit] = await CommunicationAuditModel.create([input], { session });
+    return audit;
+  }
+  return CommunicationAuditModel.create(input);
+};

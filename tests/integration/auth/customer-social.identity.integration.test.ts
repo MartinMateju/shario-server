@@ -1,3 +1,4 @@
+import bcrypt from "bcryptjs";
 import {
   afterAll,
   beforeAll,
@@ -5,6 +6,7 @@ import {
   describe,
   expect,
   it,
+  vi,
 } from "vitest";
 
 import {
@@ -79,6 +81,131 @@ describeMongoIntegration(
       expect(String(identity?.user)).toBe(String(customer._id));
     });
 
+    it("revokes the password and sessions of an unverified pre-registered account when linking", async () => {
+      const tenant = await TenantModel.create({
+        name: "Studio Olivka",
+        slug: "studio-olivka",
+      });
+      const preRegistered = await UserModel.create({
+        tenant: tenant._id,
+        firstname: "Someone",
+        lastname: "Else",
+        email: "victim@example.test",
+        password: "attacker-chosen-password",
+        customId: "U-PRE-1",
+        tenantRole: "customer",
+        platformRole: "none",
+        isAccessGranted: true,
+        isEmailVerified: false,
+        refreshToken: ["attacker-refresh-token"],
+      });
+
+      await resolveCustomerIdentity({
+        tenantId: String(tenant._id),
+        profile: profile(preRegistered.email),
+      });
+
+      const stored = await UserModel.findById(preRegistered._id)
+        .select("+password +refreshToken +sessionVersion")
+        .exec();
+      expect(stored?.isEmailVerified).toBe(true);
+      expect(await bcrypt.compare("attacker-chosen-password", stored!.password!)).toBe(
+        false,
+      );
+      expect(stored?.refreshToken).toEqual([]);
+      expect(stored?.sessionVersion).toBe(1);
+    });
+
+    it("keeps the password of an already verified account when linking", async () => {
+      const tenant = await TenantModel.create({
+        name: "Studio Olivka",
+        slug: "studio-olivka",
+      });
+      const verified = await UserModel.create({
+        tenant: tenant._id,
+        firstname: "Real",
+        lastname: "Owner",
+        email: "owner@example.test",
+        password: "own-password-123",
+        customId: "U-VER-1",
+        tenantRole: "customer",
+        platformRole: "none",
+        isAccessGranted: true,
+        isEmailVerified: true,
+      });
+
+      await resolveCustomerIdentity({
+        tenantId: String(tenant._id),
+        profile: profile(verified.email),
+      });
+
+      const stored = await UserModel.findById(verified._id)
+        .select("+password +sessionVersion")
+        .exec();
+      expect(await bcrypt.compare("own-password-123", stored!.password!)).toBe(true);
+      expect(stored?.sessionVersion ?? 0).toBe(0);
+    });
+
+    it.each([false, true])(
+      "protects the resolved account after a concurrent registration wins (verified: %s)",
+      async (isEmailVerified) => {
+        const tenant = await TenantModel.create({
+          name: "Concurrent Studio",
+          slug: "concurrent-studio",
+        });
+        const createUser = UserModel.create.bind(UserModel);
+        const createSpy = vi.spyOn(UserModel, "create");
+
+        // Commit a competing signup after the resolver's empty lookup, then
+        // let its real insert hit the unique-email index and recover the user.
+        createSpy.mockImplementationOnce(async (input: any) => {
+          await createUser({
+            tenant: tenant._id,
+            firstname: "Existing",
+            lastname: "Registrant",
+            email: "racing@example.test",
+            password: "registrant-password-123",
+            customId: "U-CONCURRENT-1",
+            tenantRole: "customer",
+            platformRole: "none",
+            isAccessGranted: true,
+            isEmailVerified,
+            refreshToken: ["registrant-refresh-token"],
+            sessionVersion: 3,
+          });
+          return createUser(input);
+        });
+
+        try {
+          const resolved = await resolveCustomerIdentity({
+            tenantId: String(tenant._id),
+            profile: profile("racing@example.test"),
+          });
+          const stored = await UserModel.findById(resolved._id)
+            .select("+password +refreshToken +sessionVersion")
+            .exec();
+
+          expect(stored?.isEmailVerified).toBe(true);
+          expect(await bcrypt.compare("registrant-password-123", stored!.password!)).toBe(
+            isEmailVerified,
+          );
+          expect(stored?.refreshToken).toEqual(
+            isEmailVerified ? ["registrant-refresh-token"] : [],
+          );
+          expect(stored?.sessionVersion).toBe(isEmailVerified ? 3 : 4);
+          expect(await UserModel.countDocuments({ tenant: tenant._id })).toBe(1);
+          const identity = await CustomerSocialIdentityModel.findOne({
+            tenant: tenant._id,
+            provider: "google",
+            subject: "google-subject",
+          }).lean();
+          expect(String(identity?.user)).toBe(String(resolved._id));
+        } finally {
+          createSpy.mockRestore();
+        }
+      },
+    );
+
     it("links an owner identity only to explicit customer mode without changing workspace membership", async () => {
       const tenant = await TenantModel.create({
         name: "Studio Olivka",
@@ -120,6 +247,11 @@ describeMongoIntegration(
         status: "active",
         role: "owner",
       });
+      const storedOwner = await UserModel.findById(owner._id)
+        .select("+password +sessionVersion")
+        .exec();
+      expect(await bcrypt.compare("workspace-password-123", storedOwner!.password!)).toBe(true);
+      expect(storedOwner?.sessionVersion ?? 0).toBe(0);
     });
 
     it("claims the generated guest course customer while preserving its id and history", async () => {

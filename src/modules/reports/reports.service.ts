@@ -1,3 +1,18 @@
+import {
+  allocateOrderForReport,
+  allocateMinorUnitsByWeight,
+  minorUnits,
+} from "./reports.allocation.js";
+export {
+  allocateOrderForReport,
+  allocateMinorUnitsByWeight,
+} from "./reports.allocation.js";
+import {
+  iterateReportCashReceipts,
+  resolveReportCashSources,
+  firstReportPaymentDates,
+  allocateReportReceiptCash,
+} from "./reports.cash.js";
 import dayjs from "dayjs";
 import { activeBookingParticipants } from "@/modules/booking/booking.attendance-read.js";
 import timezonePlugin from "dayjs/plugin/timezone.js";
@@ -141,44 +156,6 @@ const sourceAvailability = ({
   return true;
 };
 
-const lineLocationIds = (line: any): string[] =>
-  Array.isArray(line?.locationIds)
-    ? line.locationIds.map(id).filter(Boolean)
-    : [];
-
-const eligibleOrderLines = (order: any, scope: ReportLocationScope): any[] => {
-  const lines = Array.isArray(order.lineItems) ? order.lineItems : [];
-  if (scope.unrestricted && !scope.requestedLocationId) return lines;
-  return lines.filter((line: any) => {
-    const locations = lineLocationIds(line);
-    if (!locations.length) return false;
-    if (scope.requestedLocationId) {
-      return locations.includes(scope.requestedLocationId);
-    }
-    return locations.every((locationId) =>
-      scope.locationIds.includes(locationId),
-    );
-  });
-};
-
-const isOrderEligibleForScopedFacts = (
-  order: any,
-  scope: ReportLocationScope,
-): boolean => {
-  if (scope.unrestricted && !scope.requestedLocationId) return true;
-  return eligibleOrderLines(order, scope).length > 0;
-};
-
-type SalesAccumulator = {
-  grossSalesMinor: number;
-  discountsMinor: number;
-  taxMinor: number;
-  netSalesMinor: number;
-  netSalesComplete: boolean;
-  paidAmountMinor: number;
-  orders: number;
-};
-
 type ReportTopProductAccumulator = {
   productId: string | null;
   name: string;
@@ -206,333 +183,6 @@ export const finalizeTopProducts = (products: ReportTopProductAccumulator[]) =>
       );
     });
 
-const emptySales = (): SalesAccumulator => ({
-  grossSalesMinor: 0,
-  discountsMinor: 0,
-  taxMinor: 0,
-  netSalesMinor: 0,
-  netSalesComplete: true,
-  paidAmountMinor: 0,
-  orders: 0,
-});
-
-const hasTrustedTaxSnapshots = (lines: any[]): boolean =>
-  lines.length > 0 &&
-  lines.every((line) => {
-    const gross = Number(line?.grossAmountMinor);
-    const net = Number(line?.netAmountMinor);
-    const tax = Number(line?.taxAmountMinor);
-    return (
-      Number.isSafeInteger(gross) &&
-      Number.isSafeInteger(net) &&
-      Number.isSafeInteger(tax) &&
-      gross >= 0 &&
-      net >= 0 &&
-      tax >= 0 &&
-      net + tax === gross
-    );
-  });
-
-const UNALLOCATED_LOCATION = "\uffff-unallocated";
-
-const minorUnits = (value: unknown): number => {
-  const amount = Number(value);
-  return Number.isSafeInteger(amount) && amount >= 0 ? amount : 0;
-};
-
-const splitEvenly = (total: number, rawKeys: string[]): Map<string, number> => {
-  const keys = [...new Set(rawKeys)].sort();
-  const result = new Map(keys.map((key) => [key, 0]));
-  if (!keys.length) return result;
-  const base = Math.floor(total / keys.length);
-  const remainder = total % keys.length;
-  keys.forEach((key, index) => {
-    result.set(key, base + (index < remainder ? 1 : 0));
-  });
-  return result;
-};
-
-export const allocateMinorUnitsByWeight = (
-  totalValue: number,
-  rawWeights: Map<string, number>,
-): Map<string, number> => {
-  const total = minorUnits(totalValue);
-  const weights = [...rawWeights.entries()]
-    .map(([key, value]) => [key, minorUnits(value)] as const)
-    .filter(([, value]) => value > 0);
-  const result = new Map([...rawWeights.keys()].map((key) => [key, 0]));
-  if (total === 0 || !weights.length) return result;
-  const totalWeight = weights.reduce(
-    (sum, [, value]) => sum + BigInt(value),
-    0n,
-  );
-  const shares = weights.map(([key, weight]) => {
-    const product = BigInt(total) * BigInt(weight);
-    return {
-      key,
-      amount: Number(product / totalWeight),
-      remainder: product % totalWeight,
-    };
-  });
-  let remainderUnits =
-    total - shares.reduce((sum, share) => sum + share.amount, 0);
-  shares.sort((a, b) => {
-    if (a.remainder === b.remainder) return a.key.localeCompare(b.key);
-    return a.remainder > b.remainder ? -1 : 1;
-  });
-  for (const share of shares) {
-    if (remainderUnits <= 0) break;
-    share.amount += 1;
-    remainderUnits -= 1;
-  }
-  for (const share of shares) result.set(share.key, share.amount);
-  return result;
-};
-
-const roundMinorRatio = (
-  value: number,
-  numerator: number,
-  denominator: number,
-): number => {
-  if (denominator <= 0 || value <= 0 || numerator <= 0) return 0;
-  const product = BigInt(value) * BigInt(numerator);
-  const divisor = BigInt(denominator);
-  const base = product / divisor;
-  const remainder = product % divisor;
-  return Number(base + (remainder * 2n >= divisor ? 1n : 0n));
-};
-
-type ReportAllocationCell = {
-  id: string;
-  lineIndex: number;
-  locationId: string;
-  grossAmountMinor: number;
-  taxAmountMinor: number;
-};
-
-const allocateCellsThroughLocations = (
-  total: number,
-  cells: ReportAllocationCell[],
-  weight: "grossAmountMinor" | "taxAmountMinor",
-): Map<string, number> => {
-  const locationWeights = new Map<string, number>();
-  for (const cell of cells) {
-    locationWeights.set(
-      cell.locationId,
-      (locationWeights.get(cell.locationId) ?? 0) + cell[weight],
-    );
-  }
-  const locationAmounts = allocateMinorUnitsByWeight(total, locationWeights);
-  const result = new Map(cells.map((cell) => [cell.id, 0]));
-  for (const [locationId, locationAmount] of locationAmounts) {
-    const locationCells = cells.filter(
-      (cell) => cell.locationId === locationId,
-    );
-    const cellWeights = new Map(
-      locationCells.map((cell) => [cell.id, cell[weight]]),
-    );
-    const cellAmounts = allocateMinorUnitsByWeight(locationAmount, cellWeights);
-    for (const [cellId, amount] of cellAmounts) result.set(cellId, amount);
-  }
-  return result;
-};
-
-export const allocateOrderForReport = (
-  order: any,
-  scope: ReportLocationScope,
-  coverage: CoverageBuilder,
-  linePredicate?: (line: any) => boolean,
-) => {
-  const allLines = Array.isArray(order.lineItems) ? order.lineItems : [];
-  const fullyVisible = scope.unrestricted && !scope.requestedLocationId;
-  const snapshotsTrusted = hasTrustedTaxSnapshots(allLines);
-  const cells: ReportAllocationCell[] = [];
-  const lineLocations = new Map<number, string[]>();
-  allLines.forEach((line: any, lineIndex: number) => {
-    const locations = [...new Set(lineLocationIds(line))].sort();
-    lineLocations.set(lineIndex, locations);
-    if (locations.length > 1) {
-      coverage.limitations.add(
-        "Line items assigned to multiple locations are split equally, with indivisible minor-unit remainders assigned by sorted location ID.",
-      );
-    }
-    const allocationLocations = locations.length
-      ? locations
-      : [UNALLOCATED_LOCATION];
-    const gross = splitEvenly(
-      minorUnits(line.grossAmountMinor),
-      allocationLocations,
-    );
-    const tax = snapshotsTrusted
-      ? splitEvenly(minorUnits(line.taxAmountMinor), allocationLocations)
-      : new Map(allocationLocations.map((locationId) => [locationId, 0]));
-    for (const locationId of allocationLocations) {
-      cells.push({
-        id: `${locationId}:${String(lineIndex).padStart(8, "0")}`,
-        lineIndex,
-        locationId,
-        grossAmountMinor: gross.get(locationId) ?? 0,
-        taxAmountMinor: tax.get(locationId) ?? 0,
-      });
-    }
-  });
-
-  const eligibleLineIndexes = new Set<number>();
-  allLines.forEach((line: any, lineIndex: number) => {
-    if (linePredicate && !linePredicate(line)) return;
-    const locations = lineLocations.get(lineIndex) ?? [];
-    if (fullyVisible) {
-      eligibleLineIndexes.add(lineIndex);
-    } else if (scope.requestedLocationId) {
-      if (locations.includes(scope.requestedLocationId)) {
-        eligibleLineIndexes.add(lineIndex);
-      }
-    } else if (
-      locations.length > 0 &&
-      locations.every((locationId) => scope.locationIds.includes(locationId))
-    ) {
-      eligibleLineIndexes.add(lineIndex);
-    }
-  });
-  const selectedCells = cells.filter(
-    (cell) =>
-      eligibleLineIndexes.has(cell.lineIndex) &&
-      (fullyVisible ||
-        !scope.requestedLocationId ||
-        cell.locationId === scope.requestedLocationId),
-  );
-  const allLineGross = cells.reduce(
-    (sum, cell) => sum + cell.grossAmountMinor,
-    0,
-  );
-  if (allLineGross <= 0) {
-    if (fullyVisible && !linePredicate) {
-      coverage.limitations.add(
-        "Tax-exclusive net sales are unavailable for legacy orders without allocatable line-item snapshots.",
-      );
-      const orderSaleValue = minorUnits(order.grossAmountMinor);
-      const discount = minorUnits(order.appliedDiscount?.amountMinor);
-      return {
-        ratio: 1,
-        lines: allLines.map((line: any) => ({
-          ...line,
-          _reportShare: 1,
-          _reportGrossAmountMinor: minorUnits(line.grossAmountMinor),
-          _reportTaxAmountMinor: null,
-          _reportNetSalesMinor: null,
-        })),
-        grossSalesMinor: orderSaleValue + discount,
-        discountsMinor: discount,
-        taxMinor: null,
-        netSalesMinor: null,
-        paidAmountMinor: minorUnits(order.paidAmountMinor),
-        allocateMinorUnits: (value: unknown) => minorUnits(value),
-      };
-    }
-    coverage.limitations.add(
-      linePredicate
-        ? "Course sales exclude legacy orders without classifiable line-item amounts."
-        : "Location-scoped sales exclude legacy orders without allocatable line-item locations.",
-    );
-    return null;
-  }
-  if (!selectedCells.length) return null;
-
-  const sumSelected = (values: Map<string, number>) =>
-    selectedCells.reduce((sum, cell) => sum + (values.get(cell.id) ?? 0), 0);
-  const allocateSelectedMinorUnits = (value: unknown) =>
-    sumSelected(
-      allocateCellsThroughLocations(
-        minorUnits(value),
-        cells,
-        "grossAmountMinor",
-      ),
-    );
-  const orderSaleValue = minorUnits(order.grossAmountMinor);
-  const discount = minorUnits(order.appliedDiscount?.amountMinor);
-  const saleByCell = allocateCellsThroughLocations(
-    orderSaleValue,
-    cells,
-    "grossAmountMinor",
-  );
-  const discountByCell = allocateCellsThroughLocations(
-    discount,
-    cells,
-    "grossAmountMinor",
-  );
-  const paidByCell = allocateCellsThroughLocations(
-    minorUnits(order.paidAmountMinor),
-    cells,
-    "grossAmountMinor",
-  );
-  const allLineTax = cells.reduce((sum, cell) => sum + cell.taxAmountMinor, 0);
-  const fullTax = snapshotsTrusted
-    ? roundMinorRatio(orderSaleValue, allLineTax, allLineGross)
-    : null;
-  const taxByCell =
-    fullTax === null
-      ? null
-      : allocateCellsThroughLocations(fullTax, cells, "taxAmountMinor");
-  if (taxByCell === null) {
-    coverage.limitations.add(
-      "Tax-exclusive net sales are unavailable for legacy orders without line-item tax snapshots.",
-    );
-  }
-  const selectedLineGross = selectedCells.reduce(
-    (sum, cell) => sum + cell.grossAmountMinor,
-    0,
-  );
-  const selectedLines = [...eligibleLineIndexes]
-    .sort((a, b) => a - b)
-    .map((lineIndex) => {
-      const line = allLines[lineIndex];
-      const lineCells = selectedCells.filter(
-        (cell) => cell.lineIndex === lineIndex,
-      );
-      const lineSale = lineCells.reduce(
-        (sum, cell) => sum + (saleByCell.get(cell.id) ?? 0),
-        0,
-      );
-      const lineTax =
-        taxByCell === null
-          ? null
-          : lineCells.reduce(
-              (sum, cell) => sum + (taxByCell.get(cell.id) ?? 0),
-              0,
-            );
-      const locations = lineLocations.get(lineIndex) ?? [];
-      return {
-        ...line,
-        _reportShare: fullyVisible
-          ? 1
-          : locations.length > 0
-            ? lineCells.length / locations.length
-            : 0,
-        _reportGrossAmountMinor: lineCells.reduce(
-          (sum, cell) => sum + cell.grossAmountMinor,
-          0,
-        ),
-        _reportTaxAmountMinor: lineTax,
-        _reportNetSalesMinor: lineTax === null ? null : lineSale - lineTax,
-      };
-    });
-  const allocatedSaleValue = sumSelected(saleByCell);
-  const allocatedDiscount = sumSelected(discountByCell);
-  const allocatedTax = taxByCell === null ? null : sumSelected(taxByCell);
-
-  return {
-    ratio: selectedLineGross / allLineGross,
-    lines: selectedLines,
-    grossSalesMinor: allocatedSaleValue + allocatedDiscount,
-    discountsMinor: allocatedDiscount,
-    taxMinor: allocatedTax,
-    netSalesMinor:
-      allocatedTax === null ? null : allocatedSaleValue - allocatedTax,
-    paidAmountMinor: sumSelected(paidByCell),
-    allocateMinorUnits: allocateSelectedMinorUnits,
-  };
-};
-
 const buildSales = async ({
   context,
   tenant,
@@ -543,6 +193,7 @@ const buildSales = async ({
   coverage,
   productsAllowed,
   courseOnly,
+  now,
 }: {
   context: ReportContext;
   tenant: any;
@@ -553,6 +204,7 @@ const buildSales = async ({
   coverage: CoverageBuilder;
   productsAllowed: boolean;
   courseOnly: boolean;
+  now: Date;
 }) => {
   const available = sourceAvailability({
     coverage,
@@ -563,276 +215,366 @@ const buildSales = async ({
       hasPermission(context, WORKSPACE_PERMISSION.PAYMENTS_VIEW),
     ],
   });
-  if (!available) return { report: null, series: new Map(), orders: [] };
-
-  coverage.limitations.add(
-    "Refunds and payment-provider fees are unavailable because no authoritative report source is stored.",
-  );
-  coverage.limitations.add(
-    "Credit-pack purchases are excluded from sales to avoid counting stored value twice.",
-  );
-
-  const orders = (await Order.find({
-    tenant: context.tenantId,
-    isPaid: true,
-    status: ORDER_STATUS.PROCESSED,
-    paidAt: {
-      $gte: periods.queryStart,
-      $lt: periods.queryEndExclusive,
-    },
-    ...orderLocationFilter(scope),
-  })
-    .select(
-      "_id createdBy paidAt currency grossAmountMinor paidAmountMinor appliedDiscount appliedCoupons creditPurchase lineItems paymentAllocations locationIds",
-    )
-    .lean()) as any[];
-
-  let courseLinePredicate: ((line: any) => boolean) | undefined;
-  if (courseOnly) {
-    const lines = orders.flatMap((order) =>
-      Array.isArray(order.lineItems) ? order.lineItems : [],
-    );
-    const bookingIds = [
-      ...new Set(lines.map((line) => id(line.booking)).filter(Boolean)),
-    ];
-    const courseBookings = bookingIds.length
-      ? ((await Booking.find({
-          tenant: context.tenantId,
-          _id: { $in: bookingIds },
-        })
-          .select("_id tag bookingProduct")
-          .lean()) as any[])
-      : [];
-    const productIds = [
-      ...new Set(
-        [
-          ...lines.map((line) => id(line.product)),
-          ...courseBookings.map((booking) => id(booking.bookingProduct)),
-        ].filter(Boolean),
-      ),
-    ];
-    const courseProductIds = new Set(
-      productIds.length
-        ? (
-            (await Product.find({
-              tenant: context.tenantId,
-              _id: { $in: productIds },
-              type: { $in: COURSE_PRODUCT_TYPES },
-            })
-              .select("_id")
-              .lean()) as any[]
-          ).map((product) => id(product._id))
-        : [],
-    );
-    const bookingsById = new Map(
-      courseBookings.map((booking) => [id(booking._id), booking]),
-    );
-    courseLinePredicate = (line: any): boolean => {
-      const booking = bookingsById.get(id(line.booking));
-      if (booking) {
-        return (
-          isClassBookingTag(booking.tag) ||
-          courseProductIds.has(id(booking.bookingProduct))
-        );
-      }
-      return courseProductIds.has(id(line.product));
+  const sources = resolveReportCashSources({ context, scope, tenant });
+  if (!available)
+    return {
+      report: null,
+      series: new Map<string, number | null>(),
+      orders: [],
+      sources,
     };
+  sources.limitations.forEach((value) => coverage.limitations.add(value));
+  const cashExplanation =
+    "Cash paid in the selected payment-date period, less successful external refunds recorded at calculation time. Later refunds revise the original payment month. Stored-value purchases count once; wallet, voucher and membership-benefit redemptions collect no new cash. This is not profit or tax-exclusive revenue.";
+  if (courseOnly)
     coverage.limitations.add(
-      "Limited-plan sales include only line items linked to course products or class bookings; unclassifiable legacy lines are excluded.",
+      "Limited-plan cash includes only line items linked to identifiable course products; unclassifiable historical receipts are unavailable.",
     );
-  }
-
-  const byCurrency = new Map<
-    string,
-    { current: SalesAccumulator; comparison: SalesAccumulator }
-  >();
-  const methodTotals = new Map<string, number>();
-  const topProducts = new Map<string, ReportTopProductAccumulator>();
+  type Total = { amount: number; complete: boolean; payments: number };
+  const empty = (): Total => ({ amount: 0, complete: true, payments: 0 });
+  const totals = new Map<string, { current: Total; comparison: Total }>();
   const series = new Map<string, number | null>();
-  const eligibleOrders: any[] = [];
-  let sawLegacyCoupon = false;
-
-  for (const order of orders) {
-    const paidAt = asDate(order.paidAt);
-    const periodKey = periodForDate(paidAt, periods);
-    if (!periodKey) continue;
-    if (Number(order.creditPurchase?.amount ?? 0) > 0) continue;
-    const allocation = allocateOrderForReport(
-      order,
-      scope,
-      coverage,
-      courseLinePredicate,
-    );
-    if (!allocation) continue;
-    const denomination = String(order.currency || "").toUpperCase();
-    if (!denomination) continue;
-    const group = byCurrency.get(denomination) ?? {
-      current: emptySales(),
-      comparison: emptySales(),
-    };
-    const target = group[periodKey];
-    target.grossSalesMinor += allocation.grossSalesMinor;
-    target.discountsMinor += allocation.discountsMinor;
-    if (allocation.taxMinor === null || allocation.netSalesMinor === null) {
-      target.netSalesComplete = false;
-    } else {
-      target.taxMinor += allocation.taxMinor;
-      target.netSalesMinor += allocation.netSalesMinor;
+  const months = new Map<string, Total>();
+  const linked = new Map<
+    string,
+    {
+      createdBy: string;
+      currency: string;
+      _reportPeriod: string;
+      _reportNetSalesMinor: number | null;
     }
-    target.paidAmountMinor += allocation.paidAmountMinor;
-    target.orders += 1;
-    byCurrency.set(denomination, group);
-    eligibleOrders.push({
-      ...order,
-      _reportPeriod: periodKey,
-      _reportNetSalesMinor: allocation.netSalesMinor,
-    });
-
-    if (Array.isArray(order.appliedCoupons) && order.appliedCoupons.length) {
-      sawLegacyCoupon = true;
-    }
-
-    if (periodKey === "current" && denomination === currency) {
-      const bucket = reportBucketFor({
-        value: paidAt!,
-        timezone,
-        granularity: periods.granularity,
-      });
-      const existingSeries = series.get(bucket);
-      series.set(
-        bucket,
-        allocation.netSalesMinor === null || existingSeries === null
-          ? null
-          : (existingSeries ?? 0) + allocation.netSalesMinor,
-      );
-      for (const method of order.paymentAllocations ?? []) {
-        const key = String(method.method || "unknown");
-        methodTotals.set(
-          key,
-          (methodTotals.get(key) ?? 0) +
-            allocation.allocateMinorUnits(method.amountMinor),
-        );
-      }
-      if (productsAllowed) {
-        for (const line of allocation.lines) {
-          const key =
-            id(line.product) || `description:${String(line.description || "")}`;
-          const weightedGross = minorUnits(
-            line._reportGrossAmountMinor ?? line.grossAmountMinor,
-          );
-          const recognized =
-            line._reportNetSalesMinor === null
-              ? null
-              : minorUnits(line._reportNetSalesMinor);
-          const existing = topProducts.get(key) ?? {
-            productId: id(line.product) || null,
-            name: String(line.description || "Unnamed product"),
-            quantity: 0,
-            netSalesMinor: 0,
-            grossSalesMinor: 0,
-            netSalesComplete: true,
-          };
-          existing.quantity +=
-            Math.max(Number(line.quantity ?? 0), 0) *
-            Math.max(Number(line._reportShare ?? 1), 0);
-          if (recognized === null) {
-            existing.netSalesComplete = false;
-          } else {
-            existing.netSalesMinor += recognized;
-          }
-          existing.grossSalesMinor += weightedGross;
-          topProducts.set(key, existing);
-        }
-      }
-    }
-  }
-
-  if (sawLegacyCoupon) {
-    coverage.limitations.add(
-      "Legacy coupon values are not added to discounts because their stored unit is not authoritative.",
-    );
-  }
-  if (!productsAllowed) {
-    coverage.limitations.add(
-      "Top products are hidden because products.view permission is required.",
-    );
-  }
-
-  const primary = byCurrency.get(currency) ?? {
-    current: emptySales(),
-    comparison: emptySales(),
+  >();
+  const methods = new Map<string, number | null>();
+  const top = new Map<string, ReportTopProductAccumulator>();
+  let unknownDate = false,
+    unknownCurrency = false,
+    unknownPayer = false;
+  const add = (target: Total, amount: number | null) => {
+    target.payments++;
+    if (amount === null || !Number.isSafeInteger(target.amount + amount))
+      target.complete = false;
+    else target.amount += amount;
   };
-  const totalsByCurrency = [...byCurrency.entries()]
-    .map(([entryCurrency, totals]) => ({
-      currency: entryCurrency,
-      grossSalesMinor: totals.current.grossSalesMinor,
-      discountsMinor: totals.current.discountsMinor,
-      taxMinor: totals.current.netSalesComplete
-        ? totals.current.taxMinor
-        : null,
-      netSalesMinor: totals.current.netSalesComplete
-        ? totals.current.netSalesMinor
-        : null,
-      paidAmountMinor: totals.current.paidAmountMinor,
-      orders: totals.current.orders,
+  for await (const receipt of iterateReportCashReceipts({
+    context,
+    scope,
+    period: {
+      start: periods.queryStart,
+      endExclusive: periods.queryEndExclusive,
+    },
+    now,
+    sources,
+  })) {
+    const periodKey = receipt.paidAt
+      ? periodForDate(receipt.paidAt, periods)
+      : null;
+    if (!receipt.paidAt) {
+      unknownDate = true;
+      continue;
+    }
+    if (!periodKey) continue;
+    if (!receipt.currency) {
+      unknownCurrency = true;
+      continue;
+    }
+    if (receipt.customerId && receipt.paidMinor === null) unknownPayer = true;
+    const allocated = allocateReportReceiptCash(receipt, scope);
+    if (receipt.customerId && allocated.paidMinor === null) unknownPayer = true;
+    // Tax snapshots do not determine cash. Other allocation limitations remain visible.
+    for (const note of allocated.limitations)
+      if (!note.startsWith("Tax-exclusive")) coverage.limitations.add(note);
+    if (allocated.paidMinor === 0) continue;
+    const amount = allocated.cashMinor;
+    const group = totals.get(receipt.currency) ?? {
+      current: empty(),
+      comparison: empty(),
+    };
+    add(group[periodKey], amount);
+    totals.set(receipt.currency, group);
+    if (
+      receipt.customerId &&
+      receipt.paidMinor !== null &&
+      receipt.paidMinor > 0
+    ) {
+      const key = `${periodKey}:${receipt.currency}:${receipt.customerId}`;
+      const previous = linked.get(key);
+      const combined =
+        previous?._reportNetSalesMinor === null || amount === null
+          ? null
+          : (previous?._reportNetSalesMinor ?? 0) + amount;
+      linked.set(key, {
+        createdBy: receipt.customerId,
+        currency: receipt.currency,
+        _reportPeriod: periodKey,
+        _reportNetSalesMinor:
+          combined !== null && Number.isSafeInteger(combined) ? combined : null,
+      });
+    }
+    if (periodKey !== "current" || receipt.currency !== currency) continue;
+    const bucket = reportBucketFor({
+      value: receipt.paidAt,
+      timezone,
+      granularity: periods.granularity,
+    });
+    const old = series.get(bucket);
+    const combined =
+      old === null || amount === null ? null : (old ?? 0) + amount;
+    series.set(
+      bucket,
+      combined !== null && Number.isSafeInteger(combined) ? combined : null,
+    );
+    const month = dayjs(receipt.paidAt).tz(timezone).format("YYYY-MM");
+    const monthly = months.get(month) ?? empty();
+    add(monthly, amount);
+    months.set(month, monthly);
+    {
+      const key =
+        receipt.source === "order" ? "external_payment" : receipt.source;
+      const previous = methods.get(key);
+      const sum =
+        previous === null || amount === null ? null : (previous ?? 0) + amount;
+      methods.set(key, sum !== null && Number.isSafeInteger(sum) ? sum : null);
+    }
+    if (productsAllowed && receipt.order && allocated.allocation) {
+      const lines = allocated.allocation.lines;
+      const weights = new Map<string, number>(
+        lines.map((line: any, index: number) => [
+          String(index),
+          minorUnits(line._reportGrossAmountMinor),
+        ]),
+      );
+      const ambiguousActivityRefund =
+        receipt.cashMinor !== null &&
+        receipt.paidMinor !== null &&
+        receipt.cashMinor > 0 &&
+        receipt.cashMinor < receipt.paidMinor &&
+        receipt.order.lineItems?.length > 1;
+      if (ambiguousActivityRefund)
+        coverage.limitations.add(
+          "Activity cash is unavailable for partially refunded multi-line payments without reliable refund-to-line attribution; the overall payment and monthly cash remain known.",
+        );
+      const distributed =
+        amount === null || ambiguousActivityRefund
+          ? null
+          : allocateMinorUnitsByWeight(amount, weights);
+      for (let index = 0; index < lines.length; index++) {
+        const line = lines[index],
+          key =
+            id(line.product) || `description:${String(line.description || "")}`;
+        const item = top.get(key) ?? {
+          productId: id(line.product) || null,
+          name: String(line.description || "Unnamed activity"),
+          quantity: 0,
+          netSalesMinor: 0,
+          grossSalesMinor: 0,
+          netSalesComplete: true,
+        };
+        item.quantity +=
+          Math.max(Number(line.quantity ?? 0), 0) *
+          Math.max(Number(line._reportShare ?? 1), 0);
+        if (distributed === null) item.netSalesComplete = false;
+        else {
+          const sum =
+            item.netSalesMinor + (distributed.get(String(index)) ?? 0);
+          if (Number.isSafeInteger(sum)) item.netSalesMinor = sum;
+          else item.netSalesComplete = false;
+        }
+        top.set(key, item);
+      }
+    }
+  }
+  const unknown = unknownDate || unknownCurrency || !sources.complete;
+  if (unknownDate)
+    coverage.limitations.add(
+      "Some settled receipts have no reliable payment date; period cash and monthly ranking are unavailable.",
+    );
+  if (unknownCurrency)
+    coverage.limitations.add(
+      "Some settled receipts have no reliable currency; period cash and monthly ranking are unavailable.",
+    );
+  if (
+    [...totals.values()].some(
+      (group) => !group.current.complete || !group.comparison.complete,
+    )
+  )
+    coverage.limitations.add(
+      "Some recorded payments or refund allocations are incomplete or require review; affected cash totals are unavailable.",
+    );
+  const primary = totals.get(currency) ?? {
+    current: empty(),
+    comparison: empty(),
+  };
+  const value = (total: Total) =>
+    unknown || !total.complete ? null : total.amount;
+  if (unknown)
+    for (const bucket of buildReportBuckets({
+      period: periods.current,
+      timezone,
+      granularity: periods.granularity,
+    }))
+      series.set(bucket.key, null);
+  const monthlyRanking = buildCashMonthlyRanking({
+    period: periods.current,
+    timezone,
+    now,
+    months,
+    unknown,
+  });
+  const eligible = monthlyRanking.filter((row) => row.completeMonth);
+  const bestMonth =
+    eligible.length && eligible.every((row) => row.dataComplete)
+      ? ([...eligible]
+          .filter((row) => (row.cashReceivedMinor ?? 0) > 0)
+          .sort(
+            (a, b) =>
+              b.cashReceivedMinor! - a.cashReceivedMinor! ||
+              a.month.localeCompare(b.month),
+          )[0] ?? null)
+      : null;
+  const totalsByCurrency = [...totals]
+    .map(([code, group]) => ({
+      currency: code,
+      cashReceivedMinor: value(group.current),
+      netSalesMinor: value(group.current),
+      paidAmountMinor: value(group.current),
+      orders: group.current.payments,
+      grossSalesMinor: null,
+      discountsMinor: null,
+      taxMinor: null,
     }))
     .sort((a, b) => a.currency.localeCompare(b.currency));
-  if (totalsByCurrency.some((entry) => entry.currency !== currency)) {
+  if (totalsByCurrency.some((row) => row.currency !== currency))
     coverage.limitations.add(
-      `Primary sales KPIs include ${currency} only; other currencies are separated in totalsByCurrency.`,
+      `Primary cash KPIs include ${currency} only; other currencies are separated in totalsByCurrency.`,
     );
-  }
-
   return {
     report: {
       currency,
-      grossSalesMinor: primary.current.grossSalesMinor,
-      discountsMinor: primary.current.discountsMinor,
-      taxMinor: primary.current.netSalesComplete
-        ? primary.current.taxMinor
-        : null,
-      netSalesMinor: primary.current.netSalesComplete
-        ? primary.current.netSalesMinor
-        : null,
-      orders: primary.current.orders,
-      averageOrderValueMinor:
-        primary.current.orders > 0 && primary.current.netSalesComplete
-          ? Math.round(primary.current.netSalesMinor / primary.current.orders)
-          : primary.current.orders > 0
-            ? null
-            : 0,
+      cashReceivedMinor: value(primary.current),
+      netSalesMinor: value(primary.current),
+      grossSalesMinor: null,
+      discountsMinor: null,
+      taxMinor: null,
       refundsMinor: null,
-      paymentMethods: [...methodTotals.entries()]
-        .map(([method, amountMinor]) => ({ method, amountMinor }))
-        .sort((a, b) => b.amountMinor - a.amountMinor),
+      orders: primary.current.payments,
+      paymentCount: primary.current.payments,
+      averageOrderValueMinor:
+        value(primary.current) === null
+          ? null
+          : primary.current.payments
+            ? Math.round(primary.current.amount / primary.current.payments)
+            : 0,
+      paymentMethods: [...methods]
+        .map(([method, amountMinor]) => ({
+          method,
+          amountMinor: unknown ? null : amountMinor,
+        }))
+        .sort((a, b) => (b.amountMinor ?? -1) - (a.amountMinor ?? -1)),
+      paymentMethodsComplete:
+        !unknown && [...methods.values()].every((amount) => amount !== null),
       totalsByCurrency,
       topProducts: productsAllowed
-        ? finalizeTopProducts([...topProducts.values()]).slice(0, 10)
+        ? finalizeTopProducts([...top.values()])
+            .slice(0, 10)
+            .map(({ grossSalesMinor: _gross, ...row }) => ({
+              ...row,
+              netSalesMinor:
+                value(primary.current) === null ? null : row.netSalesMinor,
+              cashReceivedMinor:
+                value(primary.current) === null ? null : row.netSalesMinor,
+              grossSalesMinor: null,
+            }))
         : null,
+      topProductsComplete:
+        productsAllowed &&
+        value(primary.current) !== null &&
+        [...top.values()].every((row) => row.netSalesComplete),
+      monthlyRanking,
+      bestMonth,
+      moneyBasisExplanation: cashExplanation,
       limitations: [
-        "Refunds and payment-provider fees are unavailable.",
-        "Tax uses stored line-item snapshots and may precede legacy order-level discounts.",
+        ...sources.limitations,
+        ...(unknownDate || unknownCurrency
+          ? [
+              "Unknown payment dates or currencies prevent a complete period total.",
+            ]
+          : []),
+        ...(!primary.current.complete
+          ? [
+              "Some payments or refund allocations are incomplete or require review; cash totals and affected breakdowns are unavailable.",
+            ]
+          : []),
       ],
     },
-    primaryCurrent: primary.current,
-    primaryComparison: periods.comparison ? primary.comparison : null,
-    primaryCurrentNetSalesMinor: primary.current.netSalesComplete
-      ? primary.current.netSalesMinor
+    primaryCurrentNetSalesMinor: value(primary.current),
+    primaryComparisonNetSalesMinor: periods.comparison
+      ? value(primary.comparison)
       : null,
-    primaryComparisonNetSalesMinor:
-      periods.comparison && primary.comparison.netSalesComplete
-        ? primary.comparison.netSalesMinor
-        : null,
     series,
-    orders: eligibleOrders,
+    orders: [...linked.values()],
+    sources,
+    unknown,
+    unknownPayer,
   };
+};
+
+export const buildCashMonthlyRanking = ({
+  period,
+  timezone,
+  now,
+  months,
+  unknown = false,
+}: {
+  period: ReportPeriod;
+  timezone: string;
+  now: Date;
+  months: Map<string, { amount: number; complete: boolean; payments: number }>;
+  unknown?: boolean;
+}) => {
+  const result: Array<{
+    month: string;
+    periodStart: string;
+    periodEnd: string;
+    cashReceivedMinor: number | null;
+    paymentCount: number;
+    completeMonth: boolean;
+    dataComplete: boolean;
+  }> = [];
+  let cursor = dayjs(period.start).tz(timezone).startOf("month");
+  const last = dayjs(period.endExclusive).tz(timezone);
+  while (cursor.isBefore(last)) {
+    const month = cursor.format("YYYY-MM");
+    const start = dayjs.tz(`${month}-01`, timezone).startOf("day");
+    const nextMonth = start.add(1, "month").format("YYYY-MM");
+    const end = dayjs.tz(`${nextMonth}-01`, timezone).startOf("day");
+    const total = months.get(month) ?? {
+      amount: 0,
+      complete: true,
+      payments: 0,
+    };
+    result.push({
+      month,
+      periodStart: start.format("YYYY-MM-DD"),
+      periodEnd: end.subtract(1, "day").format("YYYY-MM-DD"),
+      cashReceivedMinor: unknown || !total.complete ? null : total.amount,
+      paymentCount: total.payments,
+      completeMonth:
+        start.toDate() >= period.start &&
+        end.toDate() <= period.endExclusive &&
+        end.toDate() <= now,
+      dataComplete: !unknown && total.complete,
+    });
+    cursor = end;
+  }
+  return result;
 };
 
 const isClassBookingTag = (tag: unknown): boolean =>
   (CLASS_BOOKING_TAGS as readonly string[]).includes(String(tag ?? ""));
 
-const bookingSeats = (booking: any): number => {
+export const bookingSeats = (booking: any): number => {
   const participants = activeBookingParticipants(booking).length;
+  if (booking.attendanceManaged === true) return participants;
   const guests = Math.max(Number(booking.numberOfGuests ?? 0), 0);
   if (isClassBookingTag(booking.tag)) {
     return Math.max(participants, guests);
@@ -859,13 +601,6 @@ export const bookingReservations = (booking: any): number => {
   );
   if (orders.size) return orders.size;
   return Number(booking.numberOfGuests ?? 0) > 0 ? 1 : 0;
-};
-
-const bookingDurationHours = (booking: any): number => {
-  const start = asDate(booking.start);
-  const end = asDate(booking.end);
-  if (!start || !end || end <= start) return 0;
-  return (end.valueOf() - start.valueOf()) / 3_600_000;
 };
 
 export const openingHoursCapacity = ({
@@ -937,6 +672,49 @@ export const openingHoursCapacity = ({
   return { total, byBucket, heatmap };
 };
 
+export const reportBookingSegments = ({
+  booking,
+  period,
+  timezone,
+  granularity,
+}: {
+  booking: any;
+  period: ReportPeriod;
+  timezone: string;
+  granularity: ResolvedReportGranularity;
+}) => {
+  const start = asDate(booking.start),
+    end = asDate(booking.end);
+  if (!start || !end || end <= start) return [];
+  let cursor = new Date(Math.max(start.valueOf(), period.start.valueOf()));
+  const finish = new Date(
+    Math.min(end.valueOf(), period.endExclusive.valueOf()),
+  );
+  const result: Array<{
+    key: string;
+    weekday: number;
+    hour: number;
+    hours: number;
+  }> = [];
+  while (cursor < finish) {
+    const local = dayjs(cursor).tz(timezone);
+    const nextHour =
+      cursor.valueOf() +
+      (60 - local.minute()) * 60_000 -
+      local.second() * 1_000 -
+      local.millisecond();
+    const next = new Date(Math.min(nextHour, finish.valueOf()));
+    result.push({
+      key: reportBucketFor({ value: cursor, timezone, granularity }),
+      weekday: (local.day() + 6) % 7,
+      hour: local.hour(),
+      hours: (next.valueOf() - cursor.valueOf()) / 3_600_000,
+    });
+    cursor = next;
+  }
+  return result;
+};
+
 const buildBookings = async ({
   context,
   tenant,
@@ -986,7 +764,10 @@ const buildBookings = async ({
   const bookingRows = (await Booking.find({
     tenant: context.tenantId,
     location: { $in: scope.locationIds },
-    start: { $gte: periods.queryStart, $lt: periods.queryEndExclusive },
+    $or: [
+      { start: { $gte: periods.queryStart, $lt: periods.queryEndExclusive } },
+      { start: { $lt: periods.queryStart }, end: { $gt: periods.queryStart } },
+    ],
     tag: { $ne: BOOKING_TAG.GUEST_INCREASE },
   })
     .select(
@@ -1114,18 +895,21 @@ const buildBookings = async ({
   const courseCapacityByBucket = new Map<string, number>();
   const courseBookedSeatsByBucket = new Map<string, number>();
 
+  const capacityLocationIds = new Set(
+    capacityLocations.map((location) => String(location._id)),
+  );
   for (const booking of bookings) {
-    const periodKey = periodForDate(asDate(booking.start), periods);
-    if (!periodKey) continue;
-    const target = stats[periodKey];
+    const start = asDate(booking.start);
+    if (!start) continue;
+    const periodKey = periodForDate(start, periods);
     if (booking.status === BOOKING_STATUS.CANCELLED) {
-      if (!isClassBookingTag(booking.tag)) target.cancellations += 1;
+      if (periodKey && !isClassBookingTag(booking.tag))
+        stats[periodKey].cancellations += 1;
       continue;
     }
     if (booking.paymentStatus !== PAYMENT_STATUS.CONFIRMED) continue;
-    const seats = bookingSeats(booking);
-    const reservations = bookingReservations(booking);
-    const duration = bookingDurationHours(booking);
+    const seats = bookingSeats(booking),
+      reservations = bookingReservations(booking);
     const product = productsById.get(id(booking.bookingProduct));
     const courseBooking =
       isClassBookingTag(booking.tag) ||
@@ -1133,22 +917,61 @@ const buildBookings = async ({
     const configuredCourseCapacity = courseBooking
       ? Math.max(Number(product?.maxNumberOfParticipants ?? 0), 0)
       : 0;
-    if (courseBooking && coursesAllowed && configuredCourseCapacity > 0) {
-      courseCapacity[periodKey].bookedSeats += seats;
-      courseCapacity[periodKey].capacity += configuredCourseCapacity;
+    const capacityVisible = capacityLocationIds.has(id(booking.location));
+    // Reservations/participants belong to the start date; occupied time belongs
+    // to each actual overlapping calendar bucket and excludes inactive capacity.
+    for (const key of ["current", "comparison"] as const) {
+      const period = key === "current" ? periods.current : periods.comparison;
+      if (!period) continue;
+      const segments = reportBookingSegments({
+        booking,
+        period,
+        timezone,
+        granularity: periods.granularity,
+      });
+      const hours = segments.reduce((sum, segment) => sum + segment.hours, 0);
+      stats[key].bookedHours += hours;
+      if (capacityVisible) stats[key].participantHours += seats * hours;
+      if (periodKey === key) {
+        stats[key].total += reservations;
+        stats[key].participants += seats;
+        if (
+          courseBooking &&
+          coursesAllowed &&
+          configuredCourseCapacity > 0 &&
+          capacityVisible
+        ) {
+          courseCapacity[key].bookedSeats += seats;
+          courseCapacity[key].capacity += configuredCourseCapacity;
+        }
+      }
+      if (key !== "current" || !capacityVisible) continue;
+      for (const segment of segments) {
+        const point = series.get(segment.key) ?? {
+          bookings: 0,
+          participants: 0,
+          participantHours: 0,
+        };
+        point.participantHours += seats * segment.hours;
+        series.set(segment.key, point);
+        const heatKey = `${segment.weekday}:${segment.hour}`;
+        const heatEntry = heat.get(heatKey) ?? {
+          bookings: 0,
+          participants: 0,
+          bookedHours: 0,
+        };
+        heatEntry.bookings += reservations;
+        heatEntry.participants += seats;
+        heatEntry.bookedHours += seats * segment.hours;
+        heat.set(heatKey, heatEntry);
+      }
     }
-    target.total += reservations;
-    target.participants += seats;
-    target.bookedHours += duration;
-    target.participantHours += seats * duration;
-
     if (periodKey !== "current") continue;
     const type = String(booking.tag || booking.bookingType || "other");
     const typeEntry = typeTotals.get(type) ?? { count: 0, participants: 0 };
     typeEntry.count += reservations;
     typeEntry.participants += seats;
     typeTotals.set(type, typeEntry);
-    const start = asDate(booking.start)!;
     const bucket = reportBucketFor({
       value: start,
       timezone,
@@ -1161,9 +984,13 @@ const buildBookings = async ({
     };
     point.bookings += reservations;
     point.participants += seats;
-    point.participantHours += seats * duration;
     series.set(bucket, point);
-    if (courseBooking && coursesAllowed && configuredCourseCapacity > 0) {
+    if (
+      courseBooking &&
+      coursesAllowed &&
+      configuredCourseCapacity > 0 &&
+      capacityVisible
+    ) {
       courseCapacityByBucket.set(
         bucket,
         (courseCapacityByBucket.get(bucket) ?? 0) + configuredCourseCapacity,
@@ -1173,29 +1000,6 @@ const buildBookings = async ({
         (courseBookedSeatsByBucket.get(bucket) ?? 0) + seats,
       );
     }
-
-    const end = asDate(booking.end);
-    let segmentStart = start;
-    while (end && segmentStart < end) {
-      const local = dayjs(segmentStart).tz(timezone);
-      const nextHour = local.startOf("hour").add(1, "hour").toDate();
-      const segmentEnd =
-        nextHour < end && nextHour > segmentStart ? nextHour : end;
-      const occupiedHours =
-        (segmentEnd.valueOf() - segmentStart.valueOf()) / 3_600_000;
-      const heatKey = `${(local.day() + 6) % 7}:${local.hour()}`;
-      const heatEntry = heat.get(heatKey) ?? {
-        bookings: 0,
-        participants: 0,
-        bookedHours: 0,
-      };
-      heatEntry.bookings += reservations;
-      heatEntry.participants += seats;
-      heatEntry.bookedHours += seats * occupiedHours;
-      heat.set(heatKey, heatEntry);
-      segmentStart = segmentEnd;
-    }
-
     if (coursesAllowed && courseBooking) {
       const capacity = Number(product?.maxNumberOfParticipants ?? 0);
       if (capacity <= 0) missingCourseCapacity = true;
@@ -1207,7 +1011,7 @@ const buildBookings = async ({
         bookedSeats: 0,
         capacity: 0,
       };
-      entry.sessions += 1;
+      entry.sessions++;
       entry.bookedSeats += seats;
       if (capacity > 0) entry.capacity += capacity;
       courseFill.set(productId, entry);
@@ -1362,7 +1166,9 @@ export const averageLinkedCustomerSpend = (
     (sum, order) => sum + Number(order._reportNetSalesMinor),
     0,
   );
-  return Math.round(netSalesMinor / customers.size);
+  return Number.isSafeInteger(netSalesMinor)
+    ? Math.round(netSalesMinor / customers.size)
+    : null;
 };
 
 export const buildUtilizationSeries = (
@@ -1429,6 +1235,23 @@ const buildCustomers = async ({
     return { report: null, current: null, comparison: null };
   }
 
+  if (sales.unknown || sales.unknownPayer)
+    return {
+      report: {
+        active: null,
+        activePaying: null,
+        new: null,
+        returning: null,
+        returningRatePercent: null,
+        averageSpendMinor: null,
+        limitations: [
+          "Some settled receipts have no reliable payment date, currency or paid amount; paying-customer classification is unavailable.",
+        ],
+      },
+      current: null,
+      comparison: null,
+    };
+
   const currentIds = new Set<string>();
   const comparisonIds = new Set<string>();
   for (const order of sales.orders) {
@@ -1455,6 +1278,7 @@ const buildCustomers = async ({
     return {
       report: {
         ...current,
+        activePaying: current.active,
         averageSpendMinor: averageLinkedCustomerSpend(
           sales.orders,
           sales.report.currency,
@@ -1469,32 +1293,15 @@ const buildCustomers = async ({
   }
 
   coverage.limitations.add(
-    "New and returning customers use the first paid order linked by createdBy; guest identity and merged accounts can affect counts.",
+    "Paying customers are linked accounts with a cash receipt in the period, including receipts later refunded. First payment includes accessible order, voucher and membership cash sources; guest identity and merged accounts can affect counts.",
   );
   const allIds = [...new Set([...currentIds, ...comparisonIds])];
-  const firstPaidAt = new Map<string, Date>();
-  if (allIds.length) {
-    const history = (await Order.find({
-      tenant: context.tenantId,
-      createdBy: { $in: allIds },
-      isPaid: true,
-      status: ORDER_STATUS.PROCESSED,
-      paidAt: { $lt: periods.current.endExclusive },
-      ...orderLocationFilter(scope),
-    })
-      .select("createdBy paidAt locationIds lineItems creditPurchase")
-      .sort({ paidAt: 1 })
-      .lean()) as any[];
-    for (const order of history) {
-      if (Number(order.creditPurchase?.amount ?? 0) > 0) continue;
-      if (!isOrderEligibleForScopedFacts(order, scope)) continue;
-      const customerId = id(order.createdBy);
-      const paidAt = asDate(order.paidAt);
-      if (customerId && paidAt && !firstPaidAt.has(customerId)) {
-        firstPaidAt.set(customerId, paidAt);
-      }
-    }
-  }
+  const firstPaidAt = await firstReportPaymentDates({
+    context,
+    scope,
+    customerIds: allIds,
+    sources: sales.sources,
+  });
 
   const classify = (ids: Set<string>, period: ReportPeriod | null) => {
     if (!period) return null;
@@ -1502,7 +1309,14 @@ const buildCustomers = async ({
     let returning = 0;
     for (const customerId of ids) {
       const first = firstPaidAt.get(customerId);
-      if (first && first >= period.start) fresh += 1;
+      if (!first)
+        return {
+          active: ids.size,
+          new: null,
+          returning: null,
+          returningRatePercent: null,
+        };
+      if (first >= period.start) fresh += 1;
       else returning += 1;
     }
     return {
@@ -1518,13 +1332,14 @@ const buildCustomers = async ({
   return {
     report: {
       ...current,
+      activePaying: current.active,
       averageSpendMinor: averageLinkedCustomerSpend(
         sales.orders,
         sales.report.currency,
       ),
       limitations: [
-        "Customer lifecycle is based on non-credit-pack paid orders linked to user accounts.",
-        "Average spend uses only net sales from linked customers with eligible orders in the workspace currency; guest sales are excluded.",
+        "Customer lifecycle uses the first recorded cash payment from the accessible payment sources; stored-value purchases count once.",
+        "Average customer cash uses recorded net cash from linked paying accounts in the workspace currency; guest receipts are excluded.",
       ],
     },
     current,
@@ -1838,8 +1653,8 @@ export const deterministicInsights = ({
   if (sales.value !== null && sales.changePercent !== null) {
     highlights.push(
       cs
-        ? `Tržby se oproti předchozímu období změnily o ${sales.changePercent} %.`
-        : `Net sales changed by ${sales.changePercent}% versus the previous period.`,
+        ? `Přijaté platby po evidovaných vratkách se oproti předchozímu období změnily o ${sales.changePercent} %.`
+        : `Cash received after recorded refunds changed by ${sales.changePercent}% versus the previous period.`,
     );
   }
   if (bookings.value !== null && bookings.changePercent !== null) {
@@ -1910,6 +1725,11 @@ export const buildReportOverview = async ({
       message: "Cross-location reporting is not included in the current plan.",
       code: "CONSOLIDATED_REPORTING_NOT_ENTITLED",
       details: {
+        customerSegmentationAvailable:
+          !reportEntitlement.courseOnly &&
+          reportEntitlement.tier !== "none" &&
+          tenant.modules?.customers === true &&
+          hasPermission(context, WORKSPACE_PERMISSION.CUSTOMERS_VIEW),
         reportingTier: reportEntitlement.tier,
         currentPlan: tenant.plan,
       },
@@ -1954,6 +1774,7 @@ export const buildReportOverview = async ({
       coverage: coverageBuilder,
       productsAllowed,
       courseOnly: reportEntitlement.courseOnly,
+      now,
     }),
     buildBookings({
       context,
@@ -2065,7 +1886,9 @@ export const buildReportOverview = async ({
         a.source.localeCompare(b.source) || a.reason.localeCompare(b.reason),
     ),
     limitations: [...coverageBuilder.limitations].sort(),
-    complete: meaningfulUnavailable.length === 0,
+    complete:
+      meaningfulUnavailable.length === 0 &&
+      coverageBuilder.limitations.size === 0,
   };
   const locale = resolveReportLocale(
     query.locale,
@@ -2088,8 +1911,18 @@ export const buildReportOverview = async ({
         : null,
       granularity: periods.granularity,
       generatedAt: now.toISOString(),
+      moneyBasis: "recorded_cash_after_refunds",
+      refundBasis: "current_recorded_state",
+      cashAsOf: now.toISOString(),
+      moneyBasisExplanation:
+        "Cash paid in the selected payment-date period, less successful external refunds recorded at calculation time; later refunds revise the original payment month. Not profit or tax-exclusive revenue.",
       locationId: scope.requestedLocationId,
       locale,
+      customerSegmentationAvailable:
+        !reportEntitlement.courseOnly &&
+        reportEntitlement.tier !== "none" &&
+        tenant.modules?.customers === true &&
+        hasPermission(context, WORKSPACE_PERMISSION.CUSTOMERS_VIEW),
       reportingTier: reportEntitlement.tier,
       consolidatedLocations: reportEntitlement.consolidatedLocations,
     },

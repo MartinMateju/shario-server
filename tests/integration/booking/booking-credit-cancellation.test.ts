@@ -40,6 +40,7 @@ import {
 } from "@/modules/communications/communications.models.js";
 import { encryptSecret } from "@/shared/security/encryption.js";
 import Booking from "@/modules/booking/booking.model.js";
+import { BookingCancellationEvent } from "@/modules/booking/booking-cancellation-event.model.js";
 import { cancelBookingWithRefund } from "@/modules/booking/services/booking.refund.service.js";
 import { MoneyCredit } from "@/modules/money-credit/money-credit.model.js";
 import { Order } from "@/modules/order/order.model.js";
@@ -69,6 +70,7 @@ describe("booking cancellation with a studio-credit refund", () => {
     await mongoose.connect(replica.getUri(), { autoIndex: false });
     await Promise.all([
       Booking.createCollection(),
+      BookingCancellationEvent.createCollection(),
       Location.createCollection(),
       CommunicationEmailLogModel.createCollection(),
       MoneyCredit.createCollection(),
@@ -98,6 +100,7 @@ describe("booking cancellation with a studio-credit refund", () => {
     await Promise.all(
       [
         Booking,
+        BookingCancellationEvent,
         MoneyCredit,
         Order,
         Product,
@@ -171,6 +174,7 @@ describe("booking cancellation with a studio-credit refund", () => {
   });
 
   it("commits cancellation and exactly one paid-amount refund without changing the member number", async () => {
+    const beforeCancellation = new Date();
     await expect(cancelBookingWithRefund(input)).resolves.toMatchObject({
       refundAmount: 250,
       currency: "CZK",
@@ -192,6 +196,11 @@ describe("booking cancellation with a studio-credit refund", () => {
       currency: "CZK",
     });
     expect(ledger?.transactions).toHaveLength(1);
+    const cancellationEvent = await BookingCancellationEvent.findOne().lean();
+    expect(cancellationEvent).toMatchObject({ tenant, location, booking, customer: user, actor: user,
+      actorType: "customer", source: "open_studio", seats: 1 });
+    expect(cancellationEvent?.occurredAt.valueOf()).toBeGreaterThanOrEqual(beforeCancellation.valueOf());
+    expect(cancellationEvent?.occurredAt.valueOf()).toBeLessThan(Date.now() + 1);
     expect(ledger?.transactions[0]).toMatchObject({
       type: "refund",
       amountMinor: 25000,
@@ -224,6 +233,7 @@ describe("booking cancellation with a studio-credit refund", () => {
     await expect(cancelBookingWithRefund(input)).rejects.toThrow(
       "Booking is already cancelled",
     );
+    expect(await BookingCancellationEvent.countDocuments()).toBe(1);
     expect(
       (await MoneyCredit.findOne({ tenant, user }).lean())?.transactions,
     ).toHaveLength(1);
@@ -289,8 +299,23 @@ describe("booking cancellation with a studio-credit refund", () => {
       moneyCreditsMinor: 0,
     });
     expect(await MoneyCredit.countDocuments()).toBe(0);
+    expect(await BookingCancellationEvent.countDocuments()).toBe(0);
     expect(await CommunicationEmailLogModel.countDocuments()).toBe(0);
     expect(deliveryMocks.enqueue).not.toHaveBeenCalled();
+  });
+
+  it("records the actual staff actor even for a staff self-cancellation", async () => {
+    await cancelBookingWithRefund({ ...input, actorUserId: String(user), cancellationActorType: "staff" });
+    expect(await BookingCancellationEvent.findOne().lean()).toMatchObject({ actor: user, actorType: "staff", customer: user });
+  });
+
+  it("rolls back cancellation and refund if its cancellation event cannot be recorded", async () => {
+    vi.spyOn(BookingCancellationEvent, "updateOne").mockRejectedValueOnce(new Error("Cancellation history unavailable"));
+    await expect(cancelBookingWithRefund(input)).rejects.toThrow("Cancellation history unavailable");
+    expect((await Booking.findById(booking).lean())?.status).toBe("processed");
+    expect((await User.findById(user).lean())?.moneyCreditsMinor).toBe(0);
+    expect(await BookingCancellationEvent.countDocuments()).toBe(0);
+    expect(await MoneyCredit.countDocuments()).toBe(0);
   });
   it("persists a recoverable email when the queue is unavailable, without losing the cancellation or refund", async () => {
     deliveryMocks.enqueue.mockRejectedValueOnce(new Error("Queue offline"));

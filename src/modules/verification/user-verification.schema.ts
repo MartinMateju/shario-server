@@ -35,6 +35,11 @@ export const verificationTokenSchema = new mongoose.Schema(
       select: false,
     },
 
+    // Verification proves ownership of this address at this credential version,
+    // never whichever address happens to be on the account when a link opens.
+    email: { type: String, trim: true, lowercase: true, default: null },
+    sessionVersion: { type: Number, min: 0, default: null },
+
     status: {
       type: String,
       enum: Object.values(VERIFICATION_STATUS),

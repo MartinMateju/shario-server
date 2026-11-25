@@ -8,6 +8,7 @@ import { reserveCommunicationEmailAllowance } from "@/modules/communication-emai
 import {
   COMMUNICATION_EMAIL_ALLOWANCE_CLASS,
   COMMUNICATION_EMAIL_TYPE,
+  getCommunicationEmailAttemptLimit,
   isBookingLifecycleEmailLog,
 } from "@/modules/communication-email-logs/communication-email-log.constants.js";
 import { communicationEmailLogRepository } from "@/modules/communication-email-logs/communication-email-log.repository.js";
@@ -60,9 +61,12 @@ export const processBookingLifecycleEmail = async ({
   let providerStarted = false;
   let providerAccepted = false;
   const recipientEmail = normalizeEmail(log.recipientEmail);
-  const maxAttempts = Math.max(
-    1,
-    Number(process.env.COMMUNICATION_EMAIL_MAX_DELIVERY_ATTEMPTS || 6),
+  const maxAttempts = getCommunicationEmailAttemptLimit(
+    log,
+    Math.max(
+      1,
+      Number(process.env.COMMUNICATION_EMAIL_MAX_DELIVERY_ATTEMPTS || 6),
+    ),
   );
 
   try {

@@ -2,6 +2,7 @@ import mongoose, { Types } from "mongoose";
 
 import nodemailer, { type SentMessageInfo, type Transporter } from "nodemailer";
 import type SMTPTransport from "nodemailer/lib/smtp-transport/index.js";
+import type SMTPPool from "nodemailer/lib/smtp-pool/index.js";
 
 import { logger } from "@/config/logger.js";
 import { RegisteredSenderEmailModel } from "@/modules/registered-sender-email/registered-sender-email.model.js";
@@ -68,7 +69,7 @@ type SenderLookupQuery = {
   email?: string;
 };
 
-export type SendEmailOptions = SMTPTransport.MailOptions & {
+export type SendEmailOptions = Omit<SMTPTransport.MailOptions, "sender"> & {
   /** Required whenever a registered sender is resolved from the database. */
   tenantId?: string;
   senderEmail?: SenderEmailInput;
@@ -376,7 +377,7 @@ const createTransporter = (
   sender: NormalizedSender,
   endpoint: ResolvedSmtpEndpoint,
 ): Transporter<SentMessageInfo> => {
-  const config: SMTPTransport.Options = {
+  const config: SMTPPool.Options = {
     // Connect to the validated address so DNS rebinding cannot redirect the
     // socket after the policy check. Keep the original hostname as SNI below.
     host: endpoint.address,
@@ -482,7 +483,7 @@ const extractSenderInput = (
       mailOptions.senderEmail ||
       mailOptions.registeredSenderEmail ||
       mailOptions.sender ||
-      mailOptions.from,
+      (typeof mailOptions.from === "string" ? mailOptions.from : undefined),
     senderEmailId:
       mailOptions.senderEmailId || mailOptions.registeredSenderEmailId || null,
   };
@@ -492,19 +493,19 @@ const sanitizeMailOptions = (
   mailOptions: SendEmailOptions,
   sender: NormalizedSender,
 ): SMTPTransport.MailOptions => {
-  const normalized: SendEmailOptions = {
-    ...mailOptions,
-    from: buildFromHeader(sender),
-  };
-
-  delete normalized.senderEmail;
-  delete normalized.senderEmailId;
-  delete normalized.sender;
-  delete normalized.registeredSenderEmail;
-  delete normalized.registeredSenderEmailId;
-  delete normalized.tenantId;
-
-  return normalized;
+  // Our sender alias refers to a registered sender document, whereas
+  // Nodemailer's sender property is an RFC mailbox. Keep that application
+  // metadata out of the transport payload.
+  const {
+    senderEmail: _senderEmail,
+    senderEmailId: _senderEmailId,
+    sender: _sender,
+    registeredSenderEmail: _registeredSenderEmail,
+    registeredSenderEmailId: _registeredSenderEmailId,
+    tenantId: _tenantId,
+    ...normalized
+  } = mailOptions;
+  return { ...normalized, from: buildFromHeader(sender) };
 };
 
 export const clearEmailServiceCache = (): void => {

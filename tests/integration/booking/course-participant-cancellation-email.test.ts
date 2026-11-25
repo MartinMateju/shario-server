@@ -20,6 +20,7 @@ vi.mock("@/modules/waitlist/waitlist.service.js", () => ({
 }));
 
 import Booking from "@/modules/booking/booking.model.js";
+import { BookingCancellationEvent } from "@/modules/booking/booking-cancellation-event.model.js";
 import { cancelPaidCourseParticipants } from "@/modules/booking/services/booking.course-participant-cancellation.service.js";
 import { CommunicationEmailLogModel } from "@/modules/communication-email-logs/communication-email-log.model.js";
 import { communicationEmailLogRepository } from "@/modules/communication-email-logs/communication-email-log.repository.js";
@@ -58,6 +59,7 @@ const input = {
   now,
 };
 const models = [
+  BookingCancellationEvent,
   Booking,
   Order,
   Tenant,
@@ -199,6 +201,9 @@ describe("durable paid Class participant cancellation notices", () => {
       false,
       true,
     ]);
+    expect(await BookingCancellationEvent.countDocuments()).toBe(1);
+    expect(await BookingCancellationEvent.findOne().lean()).toMatchObject({ tenant, location, booking,
+      customer, order, actor: staff, actorType: "staff", source: "course_participant", occurredAt: now, seats: 2 });
     const session = await Booking.findById(booking).lean();
     expect(session).toMatchObject({
       status: "processed",
@@ -342,6 +347,9 @@ describe("durable paid Class participant cancellation notices", () => {
     });
     const logs = await CommunicationEmailLogModel.find().lean();
     expect(logs).toHaveLength(2);
+    const cancellationEvents = await BookingCancellationEvent.find().lean();
+    expect(cancellationEvents).toHaveLength(2);
+    expect(new Set(cancellationEvents.map(event => String(event.order)))).toEqual(new Set([String(order), String(otherOrder)]));
     expect(new Set(logs.map((log) => log.deduplicationKey)).size).toBe(2);
     expect(new Set(logs.map((log) => String(log.sourceOrderId)))).toEqual(
       new Set([String(order), String(otherOrder)]),
@@ -404,6 +412,7 @@ describe("durable paid Class participant cancellation notices", () => {
     expect((await User.findById(customer).lean())?.moneyCreditsMinor).toBe(0);
     expect(await MoneyCredit.countDocuments()).toBe(0);
     expect(await WaitlistAuditModel.countDocuments()).toBe(0);
+    expect(await BookingCancellationEvent.countDocuments()).toBe(0);
     expect(await CommunicationEmailLogModel.countDocuments()).toBe(0);
     expect(mocks.enqueue).not.toHaveBeenCalled();
     expect(mocks.promote).not.toHaveBeenCalled();

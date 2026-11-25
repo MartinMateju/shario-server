@@ -56,6 +56,39 @@ describe("courses sharing studio capacity", () => {
     })).not.toThrow();
   });
 
+  it.each([true, false])("allows a class after an Open Studio booking when public overlap is %s", (allowPublicSoloOverlap) => {
+    const studio = {
+      ...location,
+      booking: { ...location.booking, allowPublicSoloOverlap },
+    };
+
+    expect(() => validate([request], course, studio)).not.toThrow();
+    expect(() => validate([course], request, studio)).not.toThrow();
+  });
+
+  it("still enforces people, equipment and Open Studio booking limits when adding a class", () => {
+    expect(() => validate([{ ...request, numberOfGuests: 7 }], course)).toThrowError(
+      expect.objectContaining({ code: "LOCATION_CAPACITY_EXCEEDED" }),
+    );
+    expect(() => validate([
+      { ...request, numberOfGuests: 1, plannedActivity: "SHARED_TABLE" },
+    ], course)).toThrowError(
+      expect.objectContaining({ code: "LOCATION_ACTIVITY_CAPACITY_EXCEEDED" }),
+    );
+    expect(() => validate([request], { ...course, plannedActivity: "UNDEFINED" })).toThrowError(
+      expect.objectContaining({ code: "LOCATION_ACTIVITY_CAPACITY_EXCEEDED" }),
+    );
+    expect(() => validate([], { ...course, plannedActivity: "UNDEFINED" })).not.toThrow();
+    expect(() => validate([request], {
+      ...course, plannedActivity: "UNDEFINED", courseEquipmentRequired: false,
+    })).not.toThrow();
+    expect(() => validate([course, { ...request, numberOfGuests: 1 }], {
+      ...request, numberOfGuests: 1,
+    })).toThrowError(
+      expect.objectContaining({ code: "LOCATION_CAPACITY_EXCEEDED" }),
+    );
+  });
+
   it("keeps private closures exclusive even with both location flags false", () => {
     expect(() => validate([{ ...course, tag: "private-session" }])).toThrowError(
       expect.objectContaining({ code: "LOCATION_OVERLAP_NOT_ALLOWED" }),

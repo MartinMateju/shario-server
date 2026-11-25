@@ -31,6 +31,7 @@ import { reconcileAiUsageReservations } from "@/modules/ai/services/ai-usage.ser
 import { processPendingKnowledgeEmbeddings } from "@/modules/ai/services/knowledge-retrieval.service.js";
 import { removeExpiredTempBookingsJob } from "@/modules/booking/jobs/booking-cleanup.job.js";
 import { markBookingsAsDelivered } from "@/modules/booking/jobs/booking.status.job.js";
+import { reportPaidUnfulfilledOrders } from "@/modules/checkout/services/paid-order-fulfilment-monitor.service.js";
 import { processPendingCommunicationDeliveries } from "@/modules/communications/services/delivery-processing.service.js";
 import { ensureKnowledgeTextIndex } from "@/modules/communications/knowledge-text-index.js";
 import { enforceAllCommunicationRetention } from "@/modules/communications/services/retention.service.js";
@@ -121,6 +122,9 @@ export const registerCronJobs = (
   );
   supervisor.schedule("reconcileVoucherCheckoutSessions", "* * * * *", () =>
     reconcileVoucherCheckoutSessions(),
+  );
+  supervisor.schedule("reportPaidUnfulfilledOrders", "*/10 * * * *", () =>
+    reportPaidUnfulfilledOrders(),
   );
   supervisor.schedule(
     "reconcileCourseWaitlists",

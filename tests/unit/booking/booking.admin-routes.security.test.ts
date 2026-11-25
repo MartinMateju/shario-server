@@ -58,6 +58,7 @@ vi.mock("@/modules/booking/controllers/booking.read.controller.js", () => ({
   getBookingsByProductId: mocks.readBooking,
   getBookingsByUserId: mocks.readBooking,
   getBookingsHistory: mocks.readBooking,
+  getBookingFilterOptions: mocks.readBooking,
   getBookingsWithFilters: mocks.readBooking,
   getUserBookings: mocks.readBooking,
 }));
@@ -186,5 +187,13 @@ describe("admin booking workflow permissions", () => {
       .set("x-test-permissions", "bookings.update")
       .expect(204);
     expect(mocks.lookupCustomer).toHaveBeenCalledOnce();
+  });
+  it("requires only booking view permission for narrow filter options", async () => {
+    await request(app).get("/bookings/filter-options").expect(403);
+    await request(app)
+      .get("/bookings/filter-options")
+      .set("x-test-permissions", "bookings.view")
+      .expect(204);
+    expect(mocks.readBooking).toHaveBeenCalledOnce();
   });
 });

@@ -1,6 +1,7 @@
 import cron, { type ScheduledTask } from "node-cron";
 
 import { logger } from "@/config/logger.js";
+import { cronHealth, type CronHealthRegistry } from "@/infrastructure/operations/cron-health.js";
 import type { SchedulerCoordinator } from "./redis-scheduler-coordinator.js";
 
 type CronTask = () => unknown | Promise<unknown>;
@@ -14,11 +15,13 @@ export class CronSupervisor {
   private readonly runningNames = new Set<string>();
   private readonly inFlight = new Set<Promise<void>>();
   private acceptingRuns = true;
+  private readonly registeredNames = new Set<string>();
 
   constructor(
     private readonly scheduleCron: ScheduleCron = cron.schedule,
     private readonly log: CronLogger = logger,
     private readonly coordinator?: SchedulerCoordinator,
+    private readonly health: CronHealthRegistry = cronHealth,
   ) {}
 
   schedule(name: string, expression: string, task: CronTask): ScheduledTask {
@@ -33,6 +36,8 @@ export class CronSupervisor {
     });
 
     this.scheduledTasks.push(scheduledTask);
+    this.registeredNames.add(name);
+    this.health.register(name);
     return scheduledTask;
   }
 
@@ -50,6 +55,7 @@ export class CronSupervisor {
     }
 
     this.runningNames.add(name);
+    this.health.started(name);
 
     let execution: Promise<void>;
     execution = Promise.resolve()
@@ -60,8 +66,9 @@ export class CronSupervisor {
             )
           : task(),
       )
-      .then(() => undefined)
+      .then(() => { this.health.finished(name, true); })
       .catch((error) => {
+        this.health.finished(name, false);
         this.log.error(
           {
             err: error,
@@ -85,6 +92,7 @@ export class CronSupervisor {
     }
 
     this.acceptingRuns = false;
+    for (const name of this.registeredNames) this.health.stop(name);
 
     for (const task of this.scheduledTasks) {
       try {

@@ -1,6 +1,7 @@
 import mongoose, { Schema } from "mongoose";
 
 import { STUDIO_COMMERCE_CURRENCIES } from "@/shared/money/currency.js";
+import { refundSummarySchema } from "@/modules/tenant-payments/payment-refund-reconciliation.model.js";
 import { MEMBERSHIP_INVOICE_STATUS } from "./membership.constants.js";
 
 const isSafeStripeDocumentUrl = (value: string): boolean => {
@@ -25,6 +26,7 @@ export const membershipInvoiceSchema = new Schema(
     membership: { type: Schema.Types.ObjectId, ref: "UserMembership", required: true, immutable: true },
     connectedAccountId: { type: String, required: true, trim: true, immutable: true, select: false },
     stripeInvoiceId: { type: String, required: true, trim: true, immutable: true, select: false },
+    refund: { type: refundSummarySchema, default: null },
     number: { type: String, trim: true, default: "" },
     status: {
       type: String,

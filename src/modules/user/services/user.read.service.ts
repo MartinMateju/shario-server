@@ -12,6 +12,7 @@ import {
 import { parseUserMemberNumber } from "../user-member-number.service.js";
 import type { ResolvedWorkspaceAccess } from "@/modules/tenant-access/tenant-access.types.js";
 import { withCustomerDirectoryMetrics } from "./user.directory-metrics.service.js";
+import { withCustomerMemberships } from "./user.membership-summary.service.js";
 
 export type ListUsersWithFiltersInput = {
   search?: string;
@@ -80,7 +81,8 @@ export const listUsers = async ({
   );
 
   const numberedUsers = await withEnsuredMemberNumbers({ tenantId, users: users as any[] });
-  return withCustomerDirectoryMetrics({ tenantId, users: numberedUsers, access });
+  const customers = await withCustomerDirectoryMetrics({ tenantId, users: numberedUsers, access });
+  return withCustomerMemberships({ tenantId, users: customers, access });
 };
 
 export const getCustomerById = async ({
@@ -197,7 +199,10 @@ export const listUsersWithFilters = async ({
   });
 
   return {
-    data: await withCustomerDirectoryMetrics({ tenantId, users: numberedUsers, access }),
+    data: await withCustomerMemberships({
+      tenantId, access,
+      users: await withCustomerDirectoryMetrics({ tenantId, users: numberedUsers, access }),
+    }),
     totalCount,
     totalPages: Math.ceil(totalCount / pageSize),
     currentPage: pageNumber,

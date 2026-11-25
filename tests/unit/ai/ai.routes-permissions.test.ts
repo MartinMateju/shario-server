@@ -47,6 +47,13 @@ vi.mock("@/modules/tenant-access/tenant-access.middleware.js", () => ({
   requireAnyPermission: routeMocks.requireAnyPermission,
 }));
 vi.mock("@/modules/ai/ai.limiter.js", () => ({
+  customerAiDailyLimiter: (_req: unknown, _res: unknown, next: () => void) =>
+    next(),
+  customerAiMessageLimiter: (
+    _req: unknown,
+    _res: unknown,
+    next: () => void,
+  ) => next(),
   publicAiLookupLimiter: routeMocks.publicLookupLimiter,
   publicAiMessageLimiter: routeMocks.publicMessageLimiter,
   workspaceAiBriefingLimiter: routeMocks.workspaceBriefingLimiter,

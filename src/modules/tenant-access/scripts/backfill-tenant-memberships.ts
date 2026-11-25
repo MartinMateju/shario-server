@@ -57,6 +57,7 @@ const buildMembershipInsert = (
     weekStartsOn: 1,
     defaultLandingPage: "/app",
     notifications: {
+      bookingCreated: false,
       bookingAssigned: true,
       bookingCancelled: true,
       taskAssigned: true,

@@ -29,6 +29,8 @@ export const passwordResetSchema = new mongoose.Schema(
       index: true,
     },
 
+    sessionVersion: { type: Number, min: 0, default: null },
+
     otpHash: {
       type: String,
       required: true,

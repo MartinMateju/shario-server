@@ -1,19 +1,17 @@
-import mongoose, {
-  type ClientSession,
-} from "mongoose";
+import mongoose, { type ClientSession } from "mongoose";
 
 import { PASSWORD_RESET_STATUS } from "./password-reset.constants.js";
 import { PasswordReset } from "./password-reset.model.js";
 import type { PasswordResetDocument } from "./password-reset.types.js";
 
-const toObjectId = (
-  value: string,
-): mongoose.Types.ObjectId =>
+const toObjectId = (value: string): mongoose.Types.ObjectId =>
   new mongoose.Types.ObjectId(value);
 
-const withSession = <T extends {
-  session(session: ClientSession): T;
-}>(
+const withSession = <
+  T extends {
+    session(session: ClientSession): T;
+  },
+>(
   query: T,
   session?: ClientSession | null,
 ): T => (session ? query.session(session) : query);
@@ -28,7 +26,15 @@ export const passwordResetRepository = {
     tenantId: string,
     userId: string,
     session?: ClientSession | null,
+    identity?: { email: string; sessionVersion: number },
   ): Promise<void> {
+    if (
+      identity &&
+      (!identity.email ||
+        !Number.isSafeInteger(identity.sessionVersion) ||
+        identity.sessionVersion < 0)
+    )
+      throw new Error("Invalid password reset identity scope.");
     const query = PasswordReset.updateMany(
       {
         tenant: toObjectId(tenantId),
@@ -36,6 +42,9 @@ export const passwordResetRepository = {
         status: {
           $in: ACTIVE_STATUSES,
         },
+        ...(identity
+          ? { email: identity.email, sessionVersion: identity.sessionVersion }
+          : {}),
       },
       {
         $set: {
@@ -51,20 +60,15 @@ export const passwordResetRepository = {
   },
 
   // Retained as a compatibility alias for older callers.
-  async deletePendingForUser(
-    tenantId: string,
-    userId: string,
-  ): Promise<void> {
-    await this.invalidateActiveForUser(
-      tenantId,
-      userId,
-    );
+  async deletePendingForUser(tenantId: string, userId: string): Promise<void> {
+    await this.invalidateActiveForUser(tenantId, userId);
   },
 
   async create(input: {
     tenantId: string;
     userId: string;
     email: string;
+    sessionVersion: number;
     otpHash: string;
     expiresAt: Date;
   }): Promise<PasswordResetDocument> {
@@ -72,6 +76,7 @@ export const passwordResetRepository = {
       tenant: toObjectId(input.tenantId),
       user: toObjectId(input.userId),
       email: input.email,
+      sessionVersion: input.sessionVersion,
       otpHash: input.otpHash,
       expiresAt: input.expiresAt,
       status: PASSWORD_RESET_STATUS.PENDING,
@@ -143,8 +148,7 @@ export const passwordResetRepository = {
           status: PASSWORD_RESET_STATUS.VERIFIED,
           verifiedAt: input.now,
           resetTokenHash: input.resetTokenHash,
-          resetTokenExpiresAt:
-            input.resetTokenExpiresAt,
+          resetTokenExpiresAt: input.resetTokenExpiresAt,
         },
       },
       {
@@ -200,10 +204,7 @@ export const passwordResetRepository = {
       },
     ).select("+resetTokenHash");
 
-    return withSession(
-      query,
-      input.session,
-    ).exec();
+    return withSession(query, input.session).exec();
   },
 
   // Compatibility helpers retained for isolated legacy consumers.

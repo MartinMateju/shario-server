@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   findUsers: vi.fn(),
   findBookings: vi.fn(),
   resolveCustomerBookingLink: vi.fn(),
+  resolveDoorAccessEmailTemplate: vi.fn(),
 }));
 
 vi.mock("@/infrastructure/email/managed-email.service.js", () => ({
@@ -26,6 +27,12 @@ vi.mock("@/modules/booking/booking.model.js", () => ({
 vi.mock("@/modules/booking/customer-booking-link.service.js", () => ({
   resolveCustomerBookingLink: mocks.resolveCustomerBookingLink,
 }));
+vi.mock(
+  "@/modules/access-codes/services/door-access-email-template.service.js",
+  () => ({
+    resolveDoorAccessEmailTemplate: mocks.resolveDoorAccessEmailTemplate,
+  }),
+);
 
 import {
   buildAccessCodeEmail,
@@ -68,6 +75,7 @@ describe("access-code email booking link", () => {
   });
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.resolveDoorAccessEmailTemplate.mockResolvedValue(null);
     mocks.sendEmail.mockResolvedValue({
       provider: "postmark",
       providerMessageId: "managed-1",
@@ -132,6 +140,57 @@ describe("access-code email booking link", () => {
     );
     expect(manageUrl).not.toContain("7391");
     expect(new URL(String(manageUrl)).searchParams.has("code")).toBe(false);
+  });
+
+  it("renders the exact tenant/location override while preserving the guarded managed delivery", async () => {
+    const locationId = "507f1f77bcf86cd799439018";
+    const beforeSend = vi.fn();
+    mocks.resolveDoorAccessEmailTemplate.mockResolvedValue({
+      defaultLocale: "cs",
+      contentVariants: {
+        cs: {
+          subject: "Příchod do {{studioName}}",
+          format: "plain",
+          body: "U bočního vchodu použijte {{entryCode}}.\n{{bookingTime}}\n{{bookingUrl}}",
+          htmlContent: "",
+        },
+      },
+    });
+    await sendAccessCodeEmail({
+      ...input,
+      locationId,
+      beforeSend,
+      deliveryId: "claim-123",
+    });
+    expect(mocks.resolveDoorAccessEmailTemplate).toHaveBeenCalledWith(
+      input.tenantId,
+      locationId,
+    );
+    expect(mocks.sendEmail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tenantId: input.tenantId,
+        accessCodeBookingId: input.bookingId,
+        deliveryId: "claim-123",
+        beforeSend,
+        subject: "Příchod do Studio Olivka",
+        text: expect.stringContaining("U bočního vchodu použijte 7391."),
+        headers: expect.objectContaining({
+          "X-Shario-Notification": "booking-access-code",
+        }),
+      }),
+    );
+  });
+
+  it("preserves the exact built-in content when the location has no override", async () => {
+    await sendAccessCodeEmail({ ...input, locationId: "507f1f77bcf86cd799439018" });
+    expect(mocks.sendEmail).toHaveBeenCalledWith(
+      expect.objectContaining(
+        buildAccessCodeEmail(input, {
+          locale: "en",
+          url: "https://studio-olivka.shario.io/en/portal?tab=my-bookings",
+        }),
+      ),
+    );
   });
 
   it.each([

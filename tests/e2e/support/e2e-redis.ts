@@ -5,7 +5,9 @@ export const E2E_REDIS_URL = "redis://127.0.0.1:6381/15";
 export const resetE2ERedis = async (): Promise<void> => {
   assertE2ETestMode();
   if (process.env.REDIS_URL !== E2E_REDIS_URL) {
-    throw new Error("E2E Redis reset requires the dedicated loopback database 15.");
+    throw new Error(
+      "E2E Redis reset requires the dedicated loopback database 15.",
+    );
   }
   const { redisConnection } = await import("@/infrastructure/redis/redis.js");
   if (redisConnection.options.host !== "127.0.0.1" ||
@@ -13,5 +15,16 @@ export const resetE2ERedis = async (): Promise<void> => {
     throw new Error("Refusing to reset a Redis connection outside E2E database 15.");
   }
   await redisConnection.ping();
+  if (process.env.REHEARSAL_MODE === "loopback-only") {
+    // The rehearsal claims an empty database before starting any process.
+    // Preserve that ownership marker and refuse to clear unexpected data.
+    const { assertOwnedEmptyRedis } =
+      await import("../../rollback/redis-isolation.mjs");
+    await assertOwnedEmptyRedis({
+      url: E2E_REDIS_URL,
+      owner: process.env.REHEARSAL_REDIS_OWNER,
+    });
+    return;
+  }
   await redisConnection.flushdb("SYNC");
 };

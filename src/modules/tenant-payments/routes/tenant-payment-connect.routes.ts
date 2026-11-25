@@ -1,3 +1,4 @@
+import { listRefundReviews, resolveRefundReview } from "../controllers/payment-refund-review.controller.js";
 import { Router } from "express";
 
 import { verifyJWT } from "@/modules/auth/middleware/verifyJWT.js";
@@ -42,6 +43,9 @@ tenantPaymentConnectRouter.post(
   tenantPaymentConnectLimiter,
   openCurrentTenantPaymentDashboard,
 );
+
+tenantPaymentConnectRouter.get("/refund-reviews", requirePermission(WORKSPACE_PERMISSION.PAYMENTS_VIEW), listRefundReviews);
+tenantPaymentConnectRouter.post("/refund-reviews/:id/resolve", requirePermission(WORKSPACE_PERMISSION.PAYMENTS_REFUND), resolveRefundReview);
 
 export default tenantPaymentConnectRouter;
 

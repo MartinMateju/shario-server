@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import Stripe from "stripe";
 
 import { logger } from "@/config/logger.js";
@@ -958,6 +959,12 @@ const schedulePlanChange = async ({
     getSubscriptionItem(stripeSubscription).price.id,
     priceId,
     stripeSubscription.current_period_end,
+    // Unique per action. Stripe replays the stored response for a repeated
+    // key, so a key built only from the plan pair made "A, then B, then A
+    // again" a silent no-op that still reported success. Network retries
+    // inside this call reuse the key, and Stripe refuses a second schedule on
+    // the same subscription, so a double submit cannot duplicate it.
+    randomUUID(),
   ].join(":");
   const schedule = await stripe.subscriptionSchedules.create(
     { from_subscription: stripeSubscription.id },
@@ -1107,6 +1114,8 @@ export const changeTenantPlan = async ({
         context.priceId,
         context.offerId,
         stripeSubscription.current_period_start,
+        // Unique per action; see the schedule key above.
+        randomUUID(),
       ].join(":"),
     },
   );

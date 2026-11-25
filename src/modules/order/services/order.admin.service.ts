@@ -10,6 +10,7 @@ import {
 } from "../order.repository.js";
 import type { PaginatedOrdersResult } from "../order.types.js";
 import { parseOrderFilter } from "../order.validators.js";
+import { attachOrderSalesAmounts } from "../order.sales-amounts.js";
 
 export const getOrdersWithFilters = async ({
   tenantId,
@@ -30,11 +31,15 @@ export const getOrdersWithFilters = async ({
     });
   }
 
-  return listOrdersWithFilters({
+  const result = await listOrdersWithFilters({
     tenantId,
     input: normalized,
     allowedLocationIds,
   });
+  return {
+    ...result,
+    orders: await attachOrderSalesAmounts(tenantId, result.orders as Record<string, any>[]),
+  };
 };
 
 export const getOrderById = async ({
@@ -59,5 +64,6 @@ export const getOrderById = async ({
     });
   }
 
-  return order;
+  const [annotated] = await attachOrderSalesAmounts(tenantId, [order!]);
+  return annotated;
 };

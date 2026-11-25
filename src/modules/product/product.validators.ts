@@ -1,5 +1,6 @@
 import mongoose from "mongoose";
 import { z } from "zod";
+import { partialWithoutDefaults } from "@/shared/validation/partialWithoutDefaults.js";
 import { courseContentInputSchema } from "./product.course-content.js";
 import { voucherDesignSchema } from "@/modules/coupon/voucher-design.js";
 
@@ -304,7 +305,7 @@ const validateProduct = (
 export const createProductSchema =
   productBaseSchema.superRefine(validateProduct);
 
-export const updateProductSchema = productBaseSchema.partial().extend({
+export const updateProductSchema = partialWithoutDefaults(productBaseSchema).extend({
   id: objectIdSchema("product id"),
 });
 
@@ -326,6 +327,10 @@ export const productListQuerySchema = z.object({
     .positive()
     .max(MAX_PRODUCT_LIMIT)
     .default(DEFAULT_PRODUCT_LIMIT),
+});
+
+export const publicCourseOverviewQuerySchema = z.object({
+  location: z.string().trim().toLowerCase().max(160).regex(/^(?:[a-z0-9]+(?:-[a-z0-9]+)*)?$/).optional(),
 });
 
 export const publicProductListQuerySchema = productListQuerySchema.pick({

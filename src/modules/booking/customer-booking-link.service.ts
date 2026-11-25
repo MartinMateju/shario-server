@@ -15,6 +15,7 @@ type CustomerBookingLinkTenant = {
     hostname?: string;
     status?: string;
     type?: string;
+    isPrimary?: boolean;
   }>;
   settings?: {
     defaultLanguage?: string;

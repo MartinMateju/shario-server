@@ -95,8 +95,8 @@ const emitWaitlistJoinedNotification = ({
     eventType: "waitlist.joined",
     severity: "info",
     title: {
-      en: "Customer joined a waitlist",
-      cs: "Zákazník se přidal na čekací listinu",
+      en: "Customer joined a waiting list",
+      cs: "Zákazník se přidal na waiting list",
     },
     message: {
       en: "A new customer is waiting for a place in a class.",
@@ -1250,7 +1250,7 @@ const appendOfferHold = async ({
         },
       },
     ],
-    { session },
+    { session, updatePipeline: true },
   ).exec();
   return result.modifiedCount === 1;
 };

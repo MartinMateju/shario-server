@@ -46,6 +46,12 @@ For each upstream authentication request, the frontend server must:
    add a `Domain` attribute. Because the browser-facing response is from the
    custom domain, the cookie becomes host-only for that domain.
 7. Return the API status and JSON without caching it.
+8. On Vercel, read the single IP in its platform-overwritten
+   `x-vercel-forwarded-for` header only when `VERCEL=1`. Validate with `isIP`
+   (reject lists and absent/malformed values), bind it into the v2 signature,
+   and send `x-shario-auth-proxy-client-ip`. Never trust a browser-supplied
+   general `X-Forwarded-For` header. Outside this trusted edge environment,
+   omit the IP header and use v1 until that platform has a verified contract.
 
 Headers:
 
@@ -54,6 +60,7 @@ Headers:
 - `x-skab-auth-proxy-nonce`: fresh base64url-encoded random value (at least
   128 bits; 22-128 characters)
 - `x-skab-auth-proxy-signature`: lowercase hex HMAC-SHA256
+- `x-shario-auth-proxy-client-ip`: optional signed edge client IP (selects v2)
 
 The HMAC input is the following newline-delimited UTF-8 string:
 
@@ -72,6 +79,34 @@ Sign with `AUTH_FIRST_PARTY_PROXY_SECRET`. The API accepts a 60-second clock
 window. The upstream request target must be the API target, for example
 `/auth/customer/refresh`, even when the browser-facing BFF route has a
 different prefix.
+
+For v2, replace the first line with `shario-auth-proxy-v2` and insert the exact
+validated client IP as a new line immediately after `<browser_origin>`.
+The header cannot be added, removed or changed without invalidating the
+signature. The API verifies and claims the nonce before login rate limiting,
+then keys the limiter on the verified IP (with IPv6 subnet grouping), so
+different customers do not share the BFF server's five-attempt budget.
+Controllers reuse this verified context only within that HTTP request.
+Direct/v1 requests retain the existing upstream IP limit.
+
+## Anonymous course SSR reads
+
+Server-rendered course pages also share a hosting egress IP. On Vercel they
+reuse this v2 proof, including a fresh nonce and the verified visitor IP,
+for GET requests to only these API paths:
+
+- `/public/tenants/:slug/config`
+- `/public/tenants/:slug/products/courses`
+- `/public/tenants/:slug/products/courses/locations`
+- `/public/tenants/:slug/products/:productId` (one safe path segment; the
+  existing product handler validates the ObjectId)
+
+The exact query remains signature-bound. Signed public lookups cannot include
+cookies, authorization, a request body or mutation methods. The existing
+120-per-10-minute limit is retained per verified visitor, with IPv6 /56
+grouping; unsigned callers retain their ordinary IP budget. Other public
+routes cannot use this proof. Redis replay protection applies to these reads
+as well. Deploy the API support before the frontend SSR signer.
 
 The cookie issued through this transport is `HttpOnly`, `Secure` in
 production, `SameSite=Lax`, host-only, and `Path=/`. Frontend JavaScript never
@@ -136,8 +171,8 @@ or send it to analytics/error-reporting tools.
 
 1. Configure both secrets on the API and the proxy secret on every frontend
    server instance.
-2. Deploy the BFF routes and OAuth completion-fragment handling.
-3. Deploy this API version.
+2. Deploy this API version with v1/v2 signature support before any v2 BFF.
+3. Deploy the BFF routes and OAuth completion-fragment handling.
 4. Verify password login, refresh, logout, Google and Apple on one custom
    domain with third-party cookies disabled.
 5. Roll out to all custom domains.

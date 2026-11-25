@@ -1,3 +1,4 @@
+import { serializeRefundSummary } from "@/modules/tenant-payments/payment-refund-summary.js";
 import { plainMembershipTranslations } from "./membership.localization.js";
 
 const id = (value: any): string | null => {
@@ -204,6 +205,8 @@ export const serializeMembershipInvoice = (invoice: any) => ({
   totalAmountMinor: Number(invoice.totalAmountMinor ?? 0),
   amountPaidMinor: Number(invoice.amountPaidMinor ?? 0),
   amountDueMinor: Number(invoice.amountDueMinor ?? 0),
+  refund: serializeRefundSummary(invoice.refund),
+  netPaidAmountMinor: Math.max(0, Number(invoice.amountPaidMinor ?? 0) - Number(invoice.refund?.succeededAmountMinor ?? 0)),
   periodStart: iso(invoice.periodStart),
   periodEnd: iso(invoice.periodEnd),
   issuedAt: iso(invoice.issuedAt),

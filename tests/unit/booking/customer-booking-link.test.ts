@@ -16,6 +16,16 @@ afterEach(() => {
 });
 
 describe("customer booking management links", () => {
+  it("uses the active primary booking domain for links sent by background jobs", () => {
+    const result = buildCustomerBookingLink({
+      slug: "common-ground",
+      plan: "studio_plus",
+      planVersion: 3,
+      domains: [{ hostname: "booking.commonground.example", type: "custom", status: "active", isPrimary: true }],
+      settings: { publicDefaultLanguage: "cs" },
+    });
+    expect(result).toEqual({ locale: "cs", url: "https://booking.commonground.example/cs/portal?tab=my-bookings" });
+  });
   it.each([
     ["EN", "en"],
     ["CZ", "cs"],

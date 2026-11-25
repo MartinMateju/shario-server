@@ -6,6 +6,7 @@ import {
   ORDER_NOTIFICATION_TYPE,
   ORDER_STATUS,
 } from "./order.constants.js";
+import { refundSummarySchema } from "@/modules/tenant-payments/payment-refund-reconciliation.model.js";
 import type { Order, OrderModel } from "./order.types.js";
 import {
   DEFAULT_STUDIO_COMMERCE_CURRENCY,
@@ -577,6 +578,8 @@ const orderDefinition: SchemaDefinition<Order> = {
     default: "",
   },
 
+  refund: { type: refundSummarySchema, default: null },
+  refundReconciliationRevision: { type: Number, default: 0 },
   isPaid: {
     type: Boolean,
     default: false,

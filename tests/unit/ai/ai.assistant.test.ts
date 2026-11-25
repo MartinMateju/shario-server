@@ -308,6 +308,7 @@ const access: ResolvedWorkspaceAccess = {
     defaultLandingPage: "",
     contextualGuides: {},
     notifications: {
+      bookingCreated: false,
       bookingAssigned: true,
       bookingCancelled: true,
       taskAssigned: true,

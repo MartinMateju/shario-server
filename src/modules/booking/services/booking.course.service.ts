@@ -19,6 +19,7 @@ import {
   SUPPORTED_LANGUAGES,
 } from "@/modules/booking/booking.constants.js";
 import { createBookingRepository } from "@/modules/booking/booking.repository.js";
+import { insertCalendarSessionsWithConflictCheck } from "@/modules/booking/services/booking.session-insert.service.js";
 import { locationRepository } from "@/modules/location/location.repository.js";
 import { createOrderRepository } from "@/modules/order/order.repository.js";
 import { createProductRepository } from "@/modules/product/product.repository.js";
@@ -207,7 +208,11 @@ export const createCourseBookingRecords = async ({
     } as CourseBookingInsert;
   });
 
-  const result = await bookingRepository.insertMany(records);
+  const result = await insertCalendarSessionsWithConflictCheck({
+    tenantId: tenantIdString,
+    locationId: String(locationId),
+    records,
+  });
 
   return {
     count: result.length,

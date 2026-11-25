@@ -93,7 +93,10 @@ export const businessAdvisorCoverage = (
     available,
     unavailable,
     limitations,
-    complete: coverage.complete === true && unavailable.length === 0,
+    complete:
+      coverage.complete === true &&
+      unavailable.length === 0 &&
+      limitations.length === 0,
   };
 };
 
@@ -261,6 +264,8 @@ export const buildBusinessAdvisorRecommendations = (
   const utilizationKpi = asRecord(summary.utilizationPercent);
   const returningKpi = asRecord(summary.returningCustomerPercent);
   const sales = asRecord(overview.sales);
+  const cashBasis =
+    overview.metadata?.moneyBasis === "recorded_cash_after_refunds";
   const bookings = asRecord(overview.bookings);
   const customers = asRecord(overview.customers);
   const operations = asRecord(overview.operations);
@@ -298,17 +303,25 @@ export const buildBusinessAdvisorRecommendations = (
           salesOrders >= 30
             ? BUSINESS_ADVISOR_CONFIDENCE.HIGH
             : BUSINESS_ADVISOR_CONFIDENCE.MEDIUM,
-        title: aiProductText(localeValue, "advisor.message001"),
-        rationale: aiProductText(localeValue, "advisor.message002", {
-          value1: Math.abs(salesChange),
-        }),
+        title: aiProductText(
+          localeValue,
+          cashBasis ? "advisor.message045" : "advisor.message001",
+        ),
+        rationale: aiProductText(
+          localeValue,
+          cashBasis ? "advisor.message046" : "advisor.message002",
+          { value1: Math.abs(salesChange) },
+        ),
         nextStep: aiProductText(localeValue, "advisor.message003"),
         evidence: [
           evidence({
             overview,
             source: "sales",
             metric: "netSales",
-            label: aiProductText(localeValue, "advisor.message004"),
+            label: aiProductText(
+              localeValue,
+              cashBasis ? "advisor.message047" : "advisor.message004",
+            ),
             value: salesValue,
             previousValue: salesPrevious,
             changePercent: salesChange,

@@ -1,0 +1,103 @@
+name: External operational monitor
+
+on:
+  # GitHub schedules are best effort, not a five-minute availability SLA.
+  schedule:
+    - cron: "2-59/5 * * * *"
+  workflow_dispatch:
+    inputs:
+      initialize_state:
+        description: "Explicitly initialize missing/blocked monitor state after reviewing the prior incident"
+        type: boolean
+        default: false
+  pull_request:
+    paths:
+      - "package.json"
+      - "package-lock.json"
+      - "scripts/operations-monitor*"
+      - ".github/workflows/operational-monitor.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: operational-monitor-${{ github.event_name == 'pull_request' && github.ref || 'production' }}
+  cancel-in-progress: false
+
+jobs:
+  test:
+    name: Isolated monitor and SMTP regression tests
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install locked runtime dependencies without application hooks
+        run: npm ci --omit=dev --ignore-scripts --no-audit --no-fund
+      - name: Test using loopback HTTP and SMTP only
+        run: node --test scripts/operations-monitor.test.mjs
+
+  monitor:
+    name: Check production and notify the operational owner
+    # Disabled until an operator explicitly configures this repository variable.
+    if: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && vars.OPS_MONITOR_ENABLED == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    env:
+      OPS_MONITOR_STATE_PATH: ${{ github.workspace }}/.operations-monitor/state.json
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install locked runtime dependencies without application hooks
+        run: npm ci --omit=dev --ignore-scripts --no-audit --no-fund
+      - name: Restore durable incident state from the previous monitor run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/operations-monitor-state.mjs
+      - name: Check endpoints and deliver failure or recovery notification
+        id: check
+        env:
+          OPS_MONITOR_NAMESPACE: ${{ vars.OPS_MONITOR_NAMESPACE }}
+          OPS_MONITOR_ALLOWED_ORIGINS: ${{ vars.OPS_MONITOR_ALLOWED_ORIGINS }}
+          OPS_MONITOR_PUBLIC_SITE_ORIGIN: ${{ vars.OPS_MONITOR_PUBLIC_SITE_ORIGIN }}
+          OPS_MONITOR_API_URL: ${{ vars.OPS_MONITOR_API_URL }}
+          OPS_MONITOR_WEB_URL: ${{ vars.OPS_MONITOR_WEB_URL }}
+          OPS_MONITOR_REMINDER_MINUTES: ${{ vars.OPS_MONITOR_REMINDER_MINUTES }}
+          OPS_ALERT_TO: ${{ vars.OPS_ALERT_TO }}
+          OPS_MONITOR_FROM_EMAIL: ${{ vars.OPS_MONITOR_FROM_EMAIL }}
+          OPS_MONITOR_SMTP_HOST: ${{ vars.OPS_MONITOR_SMTP_HOST }}
+          OPS_MONITOR_SMTP_PORT: ${{ vars.OPS_MONITOR_SMTP_PORT }}
+          OPS_MONITOR_POSTMARK_KEEP_ID: ${{ vars.OPS_MONITOR_POSTMARK_KEEP_ID }}
+          OPS_MONITOR_TOKEN: ${{ secrets.OPS_MONITOR_TOKEN }}
+          OPS_MONITOR_SMTP_USER: ${{ secrets.OPS_MONITOR_SMTP_USER }}
+          OPS_MONITOR_SMTP_PASSWORD: ${{ secrets.OPS_MONITOR_SMTP_PASSWORD }}
+          INITIALIZE_STATE: ${{ github.event_name == 'workflow_dispatch' && inputs.initialize_state || false }}
+        run: |
+          if [ "$INITIALIZE_STATE" = "true" ]; then
+            node scripts/operations-monitor.mjs --initialize-state
+          else
+            node scripts/operations-monitor.mjs
+          fi
+      - name: Persist incident state even when the monitored service or email delivery failed
+        if: ${{ always() && steps.check.outputs.state_written == 'true' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: operations-monitor-state-v1
+          path: ${{ env.OPS_MONITOR_STATE_PATH }}
+          retention-days: 90
+          if-no-files-found: error
+          overwrite: true

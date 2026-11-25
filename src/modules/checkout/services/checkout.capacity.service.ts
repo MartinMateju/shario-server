@@ -1,3 +1,4 @@
+import { assertTimedRange } from "@/modules/booking/booking-time-rules.js";
 import { resolveLocationBookingPlannedActivity } from "@/modules/booking/booking.activity-policy.js";
 import {
   bookingUsesActivityCapacity,
@@ -149,7 +150,15 @@ const validateOneBookingAtTime = ({ booking, acceptedBookings, location }) => {
     (candidate) => !isCourseCapacityBooking(candidate),
   );
 
-  if (overlappingOpenStudioBookings.length > 0 && isPublic && allExistingPublic) {
+  // Classes reserve people/equipment but do not occupy an Open Studio booking
+  // lane. Apply the lane policy only when adding another Open Studio booking,
+  // so shared availability is independent of which booking was created first.
+  if (
+    !isCourseCapacityBooking(booking) &&
+    overlappingOpenStudioBookings.length > 0 &&
+    isPublic &&
+    allExistingPublic
+  ) {
     const allowPublicOverlap =
       config.allowPublicOverlap ?? config.allowPublicSoloOverlap;
 
@@ -225,19 +234,28 @@ const validateOneBookingAtTime = ({ booking, acceptedBookings, location }) => {
     });
   }
 
-  const activityCapacity = getActivityCapacity(
-    location,
-    booking.plannedActivity,
+  // When a Class is added last, also check the equipment used by existing
+  // bookings. Unknown class equipment reserves those occupied lanes exactly
+  // as it does when the Class was scheduled first.
+  const requestedActivities = new Set(
+    requestedType === "private" && booking.customerChoiceBooking === true
+      ? []
+      : [
+          booking.plannedActivity,
+          ...(isCourseCapacityBooking(booking)
+            ? overlappingBookings.map((candidate) => candidate.plannedActivity)
+            : []),
+        ],
   );
 
-  if (
-    activityCapacity &&
-    !(requestedType === "private" && booking.customerChoiceBooking === true)
-  ) {
+  for (const activity of requestedActivities) {
+    if (!bookingUsesActivityCapacity(booking, activity)) continue;
+    const activityCapacity = getActivityCapacity(location, activity);
+    if (!activityCapacity) continue;
     const matchingActivityGuests = overlappingBookings
       .filter(
         (candidate) =>
-          bookingUsesActivityCapacity(candidate, booking.plannedActivity),
+          bookingUsesActivityCapacity(candidate, activity),
       )
       .reduce(
         (total, candidate) => total + getGuests(candidate),
@@ -302,6 +320,16 @@ export const validateWorkshopAvailabilityOrThrow = ({
   openStudioBookings = undefined,
   currentBookings = [],
   locationById,
+  enforceTimeRules = false,
+  now = new Date(),
+}: {
+  workshopBookings?: any[];
+  openStudioBookings?: any[];
+  currentBookings?: any[];
+  locationById: Map<string, any>;
+  /** Set for new customer bookings; extensions are validated separately. */
+  enforceTimeRules?: boolean;
+  now?: Date;
 }) => {
   const requestedBookings = openStudioBookings ?? workshopBookings ?? [];
 
@@ -312,6 +340,20 @@ export const validateWorkshopAvailabilityOrThrow = ({
     booking.plannedActivity = resolveLocationBookingPlannedActivity({
       location,
       plannedActivity: booking.plannedActivity,
+    });
+
+    // Cart checkout takes start/end from the request, so apply the same time
+    // rules as booking intents: future, allowed duration, grid, opening hours.
+    if (!enforceTimeRules) continue;
+
+    assertTimedRange({
+      payload: {
+        start: booking.start ? new Date(booking.start) : null,
+        end: booking.end ? new Date(booking.end) : null,
+      },
+      location,
+      now,
+      openingHours: "when-configured",
     });
   }
 

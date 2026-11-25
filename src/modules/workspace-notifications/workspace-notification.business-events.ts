@@ -143,7 +143,7 @@ export const emitBookingCreatedNotificationsForOrderSafely = async ({
         tenantId,
         ...(actorUserId ? { actorUserId } : {}),
         requiredPermission: WORKSPACE_PERMISSION.BOOKINGS_VIEW,
-        preferenceKey: "bookingAssigned",
+        preferenceKey: "bookingCreated",
         locationId,
         eventType: "booking.created",
         severity: "info",

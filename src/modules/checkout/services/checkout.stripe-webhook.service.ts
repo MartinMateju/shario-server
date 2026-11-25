@@ -1,3 +1,4 @@
+import { reconcileRecordedRefundBeforeOrderFulfillment } from "@/modules/tenant-payments/services/payment-refund-reconciliation.service.js";
 import { getTenantPaymentStripe } from "@/modules/tenant-payments/tenant-payment.stripe.gateway.js";
 import { Order } from "@/modules/order/order.model.js";
 import { releaseBookingExtensionHolds } from "@/modules/booking/booking.extension.service.js";
@@ -608,6 +609,8 @@ export const stripeWebhookService = {
         ? session.payment_intent
         : session.payment_intent?.id || null;
 
+    await reconcileRecordedRefundBeforeOrderFulfillment({ tenantId, accountId: connectedAccountId, paymentIntentId, orderId: clientRef });
+
     const snapshot = await checkoutRepository.findOrderPaymentSnapshot({
       tenantId,
       orderId: clientRef,
@@ -659,6 +662,15 @@ export const stripeWebhookService = {
         error: integrityError,
       });
       throw integrityError;
+    }
+
+    // A Dashboard refund can arrive before checkout completion. Record the
+    // capture, but leave benefits for explicit staff review.
+    if (snapshot.refund && (snapshot.refund.reviewRequired || snapshot.refund.succeededAmountMinor > 0 || snapshot.refund.pendingAmountMinor > 0)) {
+      await Order.updateOne({ _id: clientRef, tenant: tenantId }, { $set: {
+        isPaid: true, paidAmountMinor: amountTotal, "stripe.paymentIntentId": paymentIntentId,
+      } });
+      return;
     }
 
     // A payment can settle after its checkout was explicitly expired. The

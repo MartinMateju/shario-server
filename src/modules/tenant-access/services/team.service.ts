@@ -940,6 +940,14 @@ export const updateCurrentWorkspacePreferences = async ({
     setValues["preferences.overviewLaunchCenterDismissed"] =
       input.overviewLaunchCenterDismissed;
   }
+  if (input.emailReadyBannerDismissed !== undefined) {
+    setValues["preferences.emailReadyBannerDismissed"] =
+      input.emailReadyBannerDismissed;
+  }
+  if (input.overviewAttentionDismissed !== undefined) {
+    setValues["preferences.overviewAttentionDismissed"] =
+      input.overviewAttentionDismissed;
+  }
   if (input.productTour) {
     setValues["preferences.productTour"] = {
       ...input.productTour,

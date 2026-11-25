@@ -7,6 +7,7 @@ import {
 import type { TenantDocument } from "../tenant.types.js";
 import { resolveTenantLocaleSettings } from "../tenant-locale.js";
 import { getTenantCustomerCapabilities } from "../customer-piece-access.service.js";
+import { resolveTenantPublicOrigin } from "@/modules/checkout/checkout.urls.js";
 
 /**
  * One serializer is shared by the anonymous live endpoint and the
@@ -19,10 +20,11 @@ export const buildPublicTenantConfig = async (
 ) => {
   const localeSettings = resolveTenantLocaleSettings(tenant.settings);
 
-  return {
+  const config = {
     id: String(tenant._id),
     name: tenant.name,
     slug: tenant.slug,
+    publicOrigin: resolveTenantPublicOrigin(tenant),
     settings: {
       defaultLanguage: localeSettings.defaultLanguage,
       publicDefaultLanguage: localeSettings.publicDefaultLanguage,
@@ -31,11 +33,14 @@ export const buildPublicTenantConfig = async (
       timezone: tenant.settings.timezone,
     },
     publicSite: serializeTenantPublicSite(tenant, options),
-    publicCapabilities: await derivePublicTenantCapabilities(
-      tenant,
-      undefined,
-      options,
-    ),
-    customerCapabilities: await getTenantCustomerCapabilities(tenant),
   };
+
+  // These independent reads both use the current tenant. Do not make the
+  // customer-location lookup wait for the public catalogue capability queries.
+  const [publicCapabilities, customerCapabilities] = await Promise.all([
+    derivePublicTenantCapabilities(tenant, undefined, options),
+    getTenantCustomerCapabilities(tenant),
+  ]);
+
+  return { ...config, publicCapabilities, customerCapabilities };
 };

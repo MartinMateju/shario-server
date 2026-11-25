@@ -90,17 +90,42 @@ export const isBuiltInLifecycleEmailLog = (
   log: Parameters<typeof isBookingLifecycleEmailLog>[0],
 ): boolean => isBookingLifecycleEmailLog(log) || isFiringReadyEmailLog(log);
 
+const retryableAutomationTypes = new Set([
+  "beforeBooking",
+  "afterBookingCreated",
+  "afterBooking",
+  "beforePurchase",
+  "afterPurchase",
+  "afterRegistration",
+  "oneTimeEmail",
+  "daily",
+  "weekly",
+  "monthly",
+]);
+
+/** Auth tokens and unsupported legacy automations cannot be replayed. */
+export const isRetryableCommunicationEmailContract = (
+  log: Parameters<typeof isFiringReadyEmailLog>[0],
+): boolean =>
+  isBuiltInLifecycleEmailLog(log) ||
+  (Boolean(log.automation) &&
+    log.purpose === "transactional" &&
+    log.allowanceClass === COMMUNICATION_EMAIL_ALLOWANCE_CLASS.METERED &&
+    retryableAutomationTypes.has(String(log.emailType)));
+
 /** Explicit known-unsent retries get a bounded cycle without erasing history. */
 export const getCommunicationEmailAttemptLimit = (
   log: Parameters<typeof isFiringReadyEmailLog>[0] & {
     attempts?: unknown;
     retryCycleStartAttempt?: unknown;
+    manualRetryCount?: unknown;
   },
   baseLimit: number,
 ): number => {
   const cycleStart = Number(log.retryCycleStartAttempt || 0);
   const validatedStart =
-    isFiringReadyEmailLog(log) &&
+    isRetryableCommunicationEmailContract(log) &&
+    Number(log.manualRetryCount || 0) > 0 &&
     Number.isSafeInteger(cycleStart) &&
     cycleStart >= 0 &&
     cycleStart <= Number(log.attempts || 0)

@@ -1,3 +1,4 @@
+import { serializeRefundSummary } from "@/modules/tenant-payments/payment-refund-summary.js";
 import mongoose from "mongoose";
 import Booking from "@/modules/booking/booking.model.js";
 import Location from "@/modules/location/location.model.js";
@@ -48,7 +49,7 @@ const findProtectedOrder = (tenantId: string, orderId: string) =>
   Order.findOne({
     _id: orderId, tenant: tenantId, "guestCourseCheckout.version": 1,
     "courseBookings.0": { $exists: true },
-  }).select(`_id tenant createdBy customer status isPaid guestCourseCheckout.version guestCourseCheckout.locale guestCourseCheckout.acceptedTerms guestCourseCheckout.returnContext stripe.sessionId ${accessFields}`).lean().exec();
+  }).select(`_id tenant createdBy customer status isPaid refund currency guestCourseCheckout.version guestCourseCheckout.locale guestCourseCheckout.acceptedTerms guestCourseCheckout.returnContext stripe.sessionId ${accessFields}`).lean().exec();
 
 export const getProtectedGuestCourseOrderStatus = async ({
   tenantId, orderId, accessToken,
@@ -61,7 +62,10 @@ export const getProtectedGuestCourseOrderStatus = async ({
   return {
     orderId: String(order._id), status, isPaid: order.isPaid === true,
     terminal: status !== "pending_order",
-    processing: status === "pending_order" && order.isPaid === true,
+    processing: status === "pending_order" && order.isPaid === true && !order.refund,
+    refund: serializeRefundSummary(order.refund),
+    refundReviewRequired: status === "pending_order" && Boolean(order.refund),
+    currency: order.currency,
     orderType: "guest-course",
   };
 };

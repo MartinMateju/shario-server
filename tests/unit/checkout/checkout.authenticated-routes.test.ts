@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   },
   quoteVoucherCheckout: vi.fn(),
   cancelVoucherPayment: vi.fn(),
+  cancelCheckoutPayment: vi.fn((_req, res) => res.status(200).json({ ok: true })),
   sendCheckout: vi.fn((_req, res) => res.status(200).json({ ok: true })),
   checkoutWithCredits: vi.fn((_req, res) => res.status(200).json({ ok: true })),
   findCustomer: vi.fn(),
@@ -43,6 +44,7 @@ vi.mock("@/modules/checkout/controllers/checkout.controller.js", () => ({
   checkoutWithMembership: vi.fn(),
   quoteVoucherCheckout: mocks.quoteVoucherCheckout,
   cancelVoucherPayment: mocks.cancelVoucherPayment,
+  cancelCheckoutPayment: mocks.cancelCheckoutPayment,
   sendCheckout: mocks.sendCheckout,
   checkoutWithCredits: mocks.checkoutWithCredits,
   getCheckoutOrderStatus: vi.fn(),
@@ -93,6 +95,43 @@ describe("authenticated checkout module guards", () => {
       .expect(403);
 
     expect(mocks.sendCheckout).not.toHaveBeenCalled();
+  });
+
+  it("rejects workspace-context credentials before cancelling a checkout", async () => {
+    await request(app)
+      .post("/orders/507f1f77bcf86cd799439013/cancel")
+      .set("x-auth-context", "workspace")
+      .expect(403);
+
+    expect(mocks.cancelCheckoutPayment).not.toHaveBeenCalled();
+    expect(mocks.findCustomer).not.toHaveBeenCalled();
+  });
+
+  it("requires an active tenant customer account before cancelling a checkout", async () => {
+    mocks.findCustomer.mockReturnValue({
+      select: vi.fn().mockReturnThis(),
+      lean: vi.fn().mockReturnThis(),
+      exec: vi.fn().mockResolvedValue(null),
+    });
+
+    await request(app)
+      .post("/orders/507f1f77bcf86cd799439013/cancel")
+      .expect(404);
+
+    expect(mocks.cancelCheckoutPayment).not.toHaveBeenCalled();
+  });
+
+  it("allows an active customer to cancel without verified email or enabled booking sales", async () => {
+    await request(app)
+      .post("/orders/507f1f77bcf86cd799439013/cancel")
+      .expect(200);
+
+    expect(mocks.cancelCheckoutPayment).toHaveBeenCalledOnce();
+    expect(mocks.findCustomer).toHaveBeenCalledWith({
+      _id: "507f1f77bcf86cd799439012",
+      tenant: "507f1f77bcf86cd799439011",
+      isAccessGranted: true,
+    });
   });
 
   it.each(["bookings", "courses"] as const)("allows standalone services when %s is enabled", async (module) => {

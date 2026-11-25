@@ -615,6 +615,7 @@ const membershipInput = ({
     firstBookingCelebrationSeen: true,
     contextualGuides: completedContextualGuidePreferences(),
     notifications: {
+      bookingCreated: false,
       bookingAssigned: true,
       bookingCancelled: true,
       taskAssigned: true,

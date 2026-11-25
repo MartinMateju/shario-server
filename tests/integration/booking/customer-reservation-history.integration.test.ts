@@ -179,6 +179,47 @@ describe("customer booking history classifies reservation state before paginatio
     });
   });
 
+  it("exposes only the customer's eligible unpaid card checkout for recovery", async () => {
+    const holds = Array.from({ length: 6 }, () => booking({
+      status: "pending",
+      paymentStatus: "PENDING_PAYMENT",
+      paymentExpiresAt: new Date("2026-10-22T09:00:00Z"),
+    }));
+    await Booking.collection.insertMany(holds);
+    const pending = (heldBooking: typeof holds[number], overrides = {}) => order(heldBooking._id, {
+      isPaid: false,
+      status: "pending_order",
+      expectedAmountMinor: 25_000,
+      grossAmountMinor: 25_000,
+      stripe: { sessionId: "cs_recoverable", connectedAccountId: "acct_studio", livemode: false },
+      lineItems: [{ booking: heldBooking._id }],
+      ...overrides,
+    });
+    const eligible = pending(holds[0]);
+    await Order.collection.insertMany([
+      eligible,
+      pending(holds[1], { tenant: otherTenantId }),
+      pending(holds[2], { createdBy: otherUserId }),
+      pending(holds[3], { isPaid: true }),
+      pending(holds[4], { creditPurchase: { amount: 500 } }),
+      pending(holds[5]),
+      pending(holds[5]),
+    ]);
+
+    const result = await list({ scope: "all" });
+    for (const row of result.bookings) {
+      expect(row.pendingCheckoutOrderId).toBe(
+        row.id === String(holds[0]._id) ? String(eligible._id) : null,
+      );
+    }
+    const detail = await getMyBooking({
+      tenantId: String(tenantId), userId: String(userId), bookingId: String(holds[0]._id),
+    });
+    expect(detail.pendingCheckoutOrderId).toBe(String(eligible._id));
+    expect(detail).not.toHaveProperty("stripe");
+    expect(detail).not.toHaveProperty("orders");
+  });
+
   it("does not let another tenant or customer's paid order revive an unpaid hold", async () => {
     const wrongTenant = booking({
       paymentStatus: "PENDING_PAYMENT",

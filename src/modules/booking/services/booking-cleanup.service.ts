@@ -93,6 +93,9 @@ export async function removeExpiredTempBookings(
           { status: pendingRegex },
         ],
       },
+      // A confirmed payment is never a temporary hold, whatever its status
+      // text says (imports accept "pending"). Never delete those.
+      { paymentStatus: { $ne: PAYMENT_STATUS.CONFIRMED } },
       {
         $or: [
           {

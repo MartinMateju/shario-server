@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   CUSTOMER_PORTAL_NAVIGATION_KEYS,
   CUSTOMER_PORTAL_PAGE_IDS,
+  CUSTOMER_PORTAL_PAGE_IMAGE_KEYS,
 } from "@/modules/tenants/public-site/tenant-public-site.constants.js";
 import type { TenantPublicSite } from "@/modules/tenants/tenant.types.js";
 import { PORTAL_APPEARANCE_COLOR_KEYS } from "@/shared/appearance/portal-appearance.js";
@@ -470,6 +471,61 @@ describe("tenant public-site draft publication lifecycle", () => {
       }),
     ).rejects.toThrow("destination URL");
     expect(mocks.findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it("keeps page images draft-only and preserves independent images through publish, clear, reset and version restore", async () => {
+    const pageImages = Object.fromEntries(CUSTOMER_PORTAL_PAGE_IMAGE_KEYS.map((page) => [
+      page, `https://media.example.com/${page}.webp`,
+    ])) as TenantPublicSite["customerPortal"]["pageImages"];
+    const emptyImages = Object.fromEntries(CUSTOMER_PORTAL_PAGE_IMAGE_KEYS.map((page) => [page, ""]));
+    const location = {
+      locationId: "507f1f77bcf86cd799439013", heroImageUrl: "https://media.example.com/location.webp",
+    };
+    const saved = await updateTenantPublicSiteDraft({
+      tenantId, revision: 0,
+      patch: { customerPortal: { pageImages, courses: { locations: [location] } } },
+    });
+    expect(saved.draft.customerPortal.pageImages).toEqual(pageImages);
+    expect(saved.published.customerPortal.pageImages).toEqual(emptyImages);
+    expect(serializeTenantPublicSite(tenant as never).customerPortal.pageImages).toEqual(emptyImages);
+    expect((await getTenantPublicSitePreview(tenantId)).tenant.publicSite.customerPortal.pageImages).toEqual(pageImages);
+
+    const cleared = await updateTenantPublicSiteDraft({
+      tenantId, revision: saved.editor.draftRevision,
+      patch: { customerPortal: { pageImages: { memberships: "" } } },
+    });
+    const publishedImages = { ...pageImages, memberships: "" };
+    expect(cleared.draft.customerPortal.pageImages).toEqual(publishedImages);
+    expect(cleared.draft.customerPortal.courses.locations[0]).toMatchObject(location);
+    const published = await publishTenantPublicSiteDraft({
+      tenantId, userId: ownerId, revision: cleared.editor.draftRevision,
+    });
+    expect(published.published.customerPortal.pageImages).toEqual(publishedImages);
+    expect(serializeTenantPublicSite(tenant as never).customerPortal.pageImages).toEqual(publishedImages);
+    expect(mocks.versionFindOneAndUpdate.mock.lastCall?.[1].$setOnInsert.snapshot.customerPortal.pageImages).toEqual(publishedImages);
+
+    const changed = await updateTenantPublicSiteDraft({
+      tenantId, revision: published.editor.draftRevision,
+      patch: { customerPortal: { pageImages: { credits: "/replacement.webp" } } },
+    });
+    expect(changed.published.customerPortal.pageImages).toEqual(publishedImages);
+    const reset = await resetTenantPublicSiteDraft({ tenantId, revision: changed.editor.draftRevision });
+    expect(reset.draft.customerPortal.pageImages).toEqual(publishedImages);
+
+    const versionId = "507f1f77bcf86cd799439099";
+    const query = { lean: vi.fn(), exec: vi.fn().mockResolvedValue({ _id: versionId, snapshot: legacyPublicSite }) };
+    query.lean.mockReturnValue(query);
+    mocks.versionFindOne.mockReturnValue(query);
+    const restoredLegacy = await restoreTenantPublicSiteVersion({ tenantId, versionId, revision: reset.editor.draftRevision });
+    expect(restoredLegacy.draft.customerPortal.pageImages).toEqual(emptyImages);
+    expect(restoredLegacy.published.customerPortal.pageImages).toEqual(publishedImages);
+    expect(mocks.versionFindOne).toHaveBeenLastCalledWith({ _id: versionId, tenant: tenantId });
+    query.exec.mockResolvedValue({ _id: versionId, snapshot: published.published });
+    const restoredImages = await restoreTenantPublicSiteVersion({
+      tenantId, versionId, revision: restoredLegacy.editor.draftRevision,
+    });
+    expect(restoredImages.draft.customerPortal.pageImages).toEqual(publishedImages);
+    expect(restoredImages.draft.customerPortal.courses.locations[0]).toMatchObject(location);
   });
 
   it("validates course-location ownership and keeps draft heroes private until publishing", async () => {

@@ -7,6 +7,7 @@ import { assertValidObjectId } from "../user.validators.js";
 import { TENANT_ROLE } from "../user.constants.js";
 import { getResolvedWorkspaceAccess } from "@/modules/tenant-access/tenant-access.middleware.js";
 import type { WorkspaceAccessRequest } from "@/modules/tenant-access/tenant-access.types.js";
+import { getCustomerMembershipSummary } from "../services/user.membership-summary.service.js";
 import {
   getCustomerById as getCustomerByIdService,
   getUserByCustomIdOrContact,
@@ -22,6 +23,15 @@ const normalizeParamValue = (value: unknown): string => {
 
   return String(value || "").trim();
 };
+
+export const getCustomerSummary = asyncHandler(async (req: Request, res: Response) => {
+  const summary = await getCustomerMembershipSummary({
+    tenantId: requireTenantId(req),
+    access: getResolvedWorkspaceAccess(req as WorkspaceAccessRequest),
+  });
+  res.setHeader("Cache-Control", "private, no-store");
+  res.json(summary);
+});
 
 export const getCustomerById = asyncHandler(
   async (req: Request, res: Response) => {

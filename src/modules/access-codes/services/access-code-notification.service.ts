@@ -528,6 +528,7 @@ export async function sendAccessCodeNotifications(): Promise<AccessCodeNotificat
         tenantId,
         bookingId: String(booking._id),
         deliveryId: claimToken,
+        locationId: String(location._id),
         studioName: location.name,
         studioAddress: formatLocationAddress(location),
         timezone: location.booking?.timezone || "UTC",

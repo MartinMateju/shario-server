@@ -40,6 +40,10 @@ const mocks = vi.hoisted(() => ({
   processLifecycle: vi.fn(),
   processFiring: vi.fn(),
   refreshFiring: vi.fn(),
+  reserveAllowance: vi.fn(),
+  releaseAllowance: vi.fn(),
+  consumeAllowance: vi.fn(),
+  reconcileAllowance: vi.fn(),
 }));
 
 vi.mock("@/workers/booking-lifecycle-email.processor.js", () => ({
@@ -153,6 +157,15 @@ vi.mock("@/modules/communications/communications.models.js", () => ({
   CommunicationSuppressionModel: { exists: mocks.suppressionExists },
   CommunicationConsentModel: { findOne: mocks.consentFindOne },
 }));
+vi.mock(
+  "@/modules/communication-email-logs/communication-email-allowance.service.js",
+  () => ({
+    reserveCommunicationEmailAllowance: mocks.reserveAllowance,
+    releaseCommunicationEmailAllowance: mocks.releaseAllowance,
+    consumeCommunicationEmailAllowance: mocks.consumeAllowance,
+    reconcileCommunicationEmailAllowanceReservations: mocks.reconcileAllowance,
+  }),
+);
 vi.mock("@/modules/communications/services/consent.service.js", () => ({
   isCommunicationAllowed: () => ({ allowed: true, reason: "allowed" }),
 }));
@@ -280,6 +293,13 @@ describe("communication email worker reliability", () => {
     mocks.listCandidates.mockResolvedValue([]);
     mocks.processLifecycle.mockResolvedValue({ sent: true });
     mocks.processFiring.mockResolvedValue({ sent: true });
+    mocks.reserveAllowance.mockResolvedValue({
+      kind: "exempt",
+      reason: "legacy_plan",
+    });
+    mocks.releaseAllowance.mockResolvedValue(undefined);
+    mocks.consumeAllowance.mockResolvedValue(undefined);
+    mocks.reconcileAllowance.mockResolvedValue(undefined);
   });
 
   const registrationDelivery = ({
@@ -323,7 +343,9 @@ describe("communication email worker reliability", () => {
       activatedAt: new Date("2026-08-04T10:02:00Z"),
     });
 
-    await expect(processCommunicationEmailJob(delivery as never)).resolves.toMatchObject({
+    await expect(
+      processCommunicationEmailJob(delivery as never),
+    ).resolves.toMatchObject({
       skipped: true,
       reason: "Customer registered before this automation was activated.",
     });
@@ -345,10 +367,13 @@ describe("communication email worker reliability", () => {
     // The automation remains active, but its activation changed after loading.
     mocks.automationExists.mockImplementation(
       async (filter) =>
-        !filter.activatedAt || filter.activatedAt.getTime() === reactivatedAt.getTime(),
+        !filter.activatedAt ||
+        filter.activatedAt.getTime() === reactivatedAt.getTime(),
     );
 
-    await expect(processCommunicationEmailJob(delivery as never)).resolves.toMatchObject({
+    await expect(
+      processCommunicationEmailJob(delivery as never),
+    ).resolves.toMatchObject({
       skipped: true,
       reason: "Automation was deactivated or reactivated before delivery.",
     });
@@ -380,6 +405,41 @@ describe("communication email worker reliability", () => {
     );
     expect(mocks.automationFindOne).not.toHaveBeenCalled();
     expect(mocks.quietHours).not.toHaveBeenCalled();
+  });
+
+  it("allows a new bounded automation retry cycle and stops when that cycle is exhausted", async () => {
+    const retried = {
+      ...log,
+      emailType: "oneTimeEmail",
+      allowanceClass: "metered",
+      attempts: 6,
+      retryCycleStartAttempt: 6,
+      manualRetryCount: 1,
+    };
+    mocks.logFindOne.mockReturnValue(query(retried));
+    mocks.claim.mockResolvedValue(retried);
+    await expect(
+      processCommunicationEmailJob(job as never),
+    ).resolves.toMatchObject({
+      sent: true,
+    });
+    expect(mocks.sendManagedTenantEmail).toHaveBeenCalledTimes(1);
+    mocks.claim.mockResolvedValue({ ...retried, attempts: 12 });
+    await expect(
+      processCommunicationEmailJob(job as never),
+    ).resolves.toMatchObject({
+      terminalFailure: true,
+      reason: "delivery_attempts_exhausted",
+    });
+    expect(mocks.sendManagedTenantEmail).toHaveBeenCalledTimes(1);
+    expect(mocks.markFailed).toHaveBeenCalledWith(
+      TENANT_ID,
+      LOG_ID,
+      "Automation email delivery attempts exhausted.",
+      expect.any(String),
+      true,
+      { retryable: false },
+    );
   });
 
   it("cannot elevate an ordinary automation into the built-in path using queue data or allowance", async () => {
@@ -587,25 +647,153 @@ describe("communication email worker reliability", () => {
     expect(mocks.sendManagedTenantEmail).not.toHaveBeenCalled();
   });
 
-  it("retries a definite Postmark rejection with the claim token", async () => {
+  it("stops after one permanent inactive-recipient rejection and releases its allowance", async () => {
+    mocks.reserveAllowance.mockResolvedValue({
+      kind: "reserved",
+      reservationId: "allowance-1",
+    });
     mocks.sendManagedTenantEmail.mockRejectedValue(
-      Object.assign(new Error("Postmark rejected the message"), {
-        code: "POSTMARK_300",
+      Object.assign(new Error("Postmark rejected an inactive recipient"), {
+        code: "POSTMARK_406",
         deliveryOutcome: "not_sent",
         permanent: true,
       }),
     );
-    await expect(processCommunicationEmailJob(job as never)).rejects.toThrow(
-      "Postmark rejected the message",
+    await expect(processCommunicationEmailJob(job as never)).resolves.toEqual({
+      terminalFailure: true,
+      reason: "permanent_or_exhausted_failure",
+    });
+    expect(mocks.markFailed).toHaveBeenCalledWith(
+      TENANT_ID,
+      LOG_ID,
+      "Postmark rejected an inactive recipient",
+      expect.any(String),
+      true,
+      { retryable: false },
+    );
+    expect(mocks.releaseAllowance).toHaveBeenCalledExactlyOnceWith(
+      "allowance-1",
+    );
+    expect(mocks.consumeAllowance).not.toHaveBeenCalled();
+    expect(mocks.markAmbiguous).not.toHaveBeenCalled();
+    expect(mocks.emitNotification).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        eventType: "communication.failed",
+        sourceId: LOG_ID,
+      }),
+    );
+
+    mocks.logFindOne.mockReturnValue(
+      query({ ...log, status: "failed", retryable: false }),
+    );
+    await expect(processCommunicationEmailJob(job as never)).resolves.toEqual({
+      skipped: true,
+      reason: "failed",
+    });
+    expect(mocks.sendManagedTenantEmail).toHaveBeenCalledOnce();
+    expect(mocks.markFailed).toHaveBeenCalledOnce();
+  });
+
+  it("retries a transient definite rejection with the claim token and releases its allowance", async () => {
+    mocks.reserveAllowance.mockResolvedValue({
+      kind: "reserved",
+      reservationId: "allowance-1",
+    });
+    const error = Object.assign(new Error("Postmark rate limit"), {
+      code: "POSTMARK_HTTP_429",
+      deliveryOutcome: "not_sent",
+      permanent: false,
+    });
+    mocks.sendManagedTenantEmail.mockRejectedValue(error);
+
+    await expect(processCommunicationEmailJob(job as never)).rejects.toBe(
+      error,
     );
     expect(mocks.markFailed).toHaveBeenCalledWith(
       TENANT_ID,
       LOG_ID,
-      "Postmark rejected the message",
+      "Postmark rate limit",
       expect.any(String),
       true,
+      { retryable: true },
     );
+    expect(mocks.releaseAllowance).toHaveBeenCalledExactlyOnceWith(
+      "allowance-1",
+    );
+    expect(mocks.consumeAllowance).not.toHaveBeenCalled();
     expect(mocks.markAmbiguous).not.toHaveBeenCalled();
+    expect(mocks.emitNotification).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { attempts: 5, manualRetryCount: 0, retryCycleStartAttempt: 0 },
+    { attempts: 11, manualRetryCount: 1, retryCycleStartAttempt: 6 },
+  ])(
+    "keeps an exhausted definite rejection known-unsent at attempt $attempts",
+    async (cycle) => {
+      mocks.claim.mockResolvedValue({
+        ...log,
+        emailType: "oneTimeEmail",
+        allowanceClass: "metered",
+        ...cycle,
+      });
+      mocks.reserveAllowance.mockResolvedValue({
+        kind: "reserved",
+        reservationId: "allowance-1",
+      });
+      mocks.sendManagedTenantEmail.mockRejectedValue(
+        Object.assign(new Error("Postmark temporarily unavailable"), {
+          deliveryOutcome: "not_sent",
+          permanent: false,
+        }),
+      );
+
+      await expect(processCommunicationEmailJob(job as never)).resolves.toEqual(
+        {
+          terminalFailure: true,
+          reason: "permanent_or_exhausted_failure",
+        },
+      );
+      expect(mocks.sendManagedTenantEmail).toHaveBeenCalledOnce();
+      expect(mocks.markFailed).toHaveBeenCalledWith(
+        TENANT_ID,
+        LOG_ID,
+        "Postmark temporarily unavailable",
+        expect.any(String),
+        true,
+        { retryable: false },
+      );
+      expect(mocks.releaseAllowance).toHaveBeenCalledExactlyOnceWith(
+        "allowance-1",
+      );
+      expect(mocks.consumeAllowance).not.toHaveBeenCalled();
+      expect(mocks.markAmbiguous).not.toHaveBeenCalled();
+      expect(mocks.emitNotification).toHaveBeenCalledOnce();
+    },
+  );
+
+  it("does not release allowance or notify a terminal failure when the rejection claim is lost", async () => {
+    mocks.reserveAllowance.mockResolvedValue({
+      kind: "reserved",
+      reservationId: "allowance-1",
+    });
+    mocks.markFailed.mockResolvedValue(false);
+    mocks.sendManagedTenantEmail.mockRejectedValue(
+      Object.assign(new Error("Postmark rejected an inactive recipient"), {
+        code: "POSTMARK_406",
+        deliveryOutcome: "not_sent",
+        permanent: true,
+      }),
+    );
+
+    await expect(processCommunicationEmailJob(job as never)).resolves.toEqual({
+      skipped: true,
+      reason: "claim_lost_after_provider_rejection",
+    });
+    expect(mocks.releaseAllowance).not.toHaveBeenCalled();
+    expect(mocks.consumeAllowance).not.toHaveBeenCalled();
+    expect(mocks.markAmbiguous).not.toHaveBeenCalled();
+    expect(mocks.emitNotification).not.toHaveBeenCalled();
   });
 
   it("moves a network loss with unknown Postmark outcome to manual review without retry", async () => {
@@ -630,6 +818,10 @@ describe("communication email worker reliability", () => {
   });
 
   it("treats a Postmark timeout as ambiguous because acceptance is unknown", async () => {
+    mocks.reserveAllowance.mockResolvedValue({
+      kind: "reserved",
+      reservationId: "allowance-1",
+    });
     mocks.sendManagedTenantEmail.mockRejectedValue(
       Object.assign(new Error("Request timed out after dispatch"), {
         code: "POSTMARK_OUTCOME_UNKNOWN",
@@ -644,6 +836,11 @@ describe("communication email worker reliability", () => {
     });
     expect(mocks.markAmbiguous).toHaveBeenCalled();
     expect(mocks.markFailed).not.toHaveBeenCalled();
+    expect(mocks.consumeAllowance).toHaveBeenCalledExactlyOnceWith(
+      "allowance-1",
+    );
+    expect(mocks.releaseAllowance).not.toHaveBeenCalled();
+    expect(mocks.emitNotification).not.toHaveBeenCalled();
   });
 
   it.each(["returns false", "throws"])(
@@ -706,7 +903,7 @@ describe("communication email worker reliability", () => {
   });
 
   it.each(["firingReady", "bookingRescheduled"])(
-    "respects explicit retry cycles only for firing notices, not %s contracts generally",
+    "respects audited explicit retry cycles for %s notices",
     async (emailType) => {
       const candidate = {
         ...log,
@@ -716,6 +913,7 @@ describe("communication email worker reliability", () => {
         status: "scheduled",
         attempts: 6,
         retryCycleStartAttempt: 6,
+        manualRetryCount: 1,
         queueRecoveryAttempts: 0,
       };
       mocks.listCandidates.mockResolvedValue([candidate]);
@@ -727,18 +925,13 @@ describe("communication email worker reliability", () => {
       mocks.markReconciledQueued.mockResolvedValue(true);
       mocks.markReconciliationAmbiguous.mockResolvedValue(true);
       const result = await recoverStaleCommunicationEmailJobs();
-      if (emailType === "firingReady") {
-        expect(result).toMatchObject({ queueAccepted: 1 });
-        expect(mocks.markReconciliationAmbiguous).not.toHaveBeenCalled();
-        expect(mocks.enqueue).toHaveBeenCalledWith(
-          { tenantId: TENANT_ID, emailLogId: LOG_ID },
-          "dedupe-1",
-          { allowCompletedRetry: true },
-        );
-      } else {
-        expect(result).toMatchObject({ ambiguous: 1 });
-        expect(mocks.enqueue).not.toHaveBeenCalled();
-      }
+      expect(result).toMatchObject({ queueAccepted: 1 });
+      expect(mocks.markReconciliationAmbiguous).not.toHaveBeenCalled();
+      expect(mocks.enqueue).toHaveBeenCalledWith(
+        { tenantId: TENANT_ID, emailLogId: LOG_ID },
+        "dedupe-1",
+        { allowCompletedRetry: true },
+      );
     },
   );
 

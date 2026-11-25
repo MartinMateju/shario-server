@@ -156,6 +156,10 @@ export const resolveWorkspaceAccessForUser = async ({
         rawPreferences?.defaultLandingPage ?? DEFAULT_WORKSPACE_LANDING_PAGE,
       overviewLaunchCenterDismissed:
         rawPreferences?.overviewLaunchCenterDismissed ?? false,
+      emailReadyBannerDismissed:
+        rawPreferences?.emailReadyBannerDismissed ?? false,
+      overviewAttentionDismissed:
+        rawPreferences?.overviewAttentionDismissed ?? false,
       productTour: {
         version: Math.max(0, Number(rawProductTour?.version) || 0),
         status: rawProductTour?.status ?? null,
@@ -183,6 +187,7 @@ export const resolveWorkspaceAccessForUser = async ({
         }),
       ),
       notifications: {
+        bookingCreated: rawNotifications?.bookingCreated ?? false,
         bookingAssigned: rawNotifications?.bookingAssigned ?? true,
         bookingCancelled: rawNotifications?.bookingCancelled ?? true,
         taskAssigned: rawNotifications?.taskAssigned ?? true,
@@ -228,6 +233,8 @@ export const createPlatformBypassAccess = ({
     weekStartsOn: 1,
     defaultLandingPage: DEFAULT_WORKSPACE_LANDING_PAGE,
     overviewLaunchCenterDismissed: false,
+    emailReadyBannerDismissed: false,
+    overviewAttentionDismissed: false,
     productTour: {
       version: PRODUCT_TOUR_VERSION,
       status: PRODUCT_TOUR_STATUS.COMPLETED,
@@ -247,6 +254,7 @@ export const createPlatformBypassAccess = ({
       ]),
     ),
     notifications: {
+      bookingCreated: false,
       bookingAssigned: true,
       bookingCancelled: true,
       taskAssigned: true,

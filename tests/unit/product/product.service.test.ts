@@ -56,7 +56,8 @@ vi.mock("@/modules/product/product.repository.js", () => ({
   createProductRepository: mocks.createProductRepository,
 }));
 
-vi.mock("@/modules/product/services/voucher-design.service.js", () => ({
+vi.mock("@/modules/product/services/voucher-design.service.js", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/modules/product/services/voucher-design.service.js")>(),
   prepareVoucherDesign: mocks.prepareVoucherDesign,
 }));
 
@@ -72,6 +73,7 @@ vi.mock("@/modules/piece-pricing/piece-pricing-profile.model.js", () => ({
 
 vi.mock("@/infrastructure/storage/r2.client.js", () => ({
   uploadBufferToR2: mocks.uploadBufferToR2,
+  getR2PublicUrl: (key: string) => `https://media.shario.test/${key}`,
 }));
 
 vi.mock("@/modules/product/services/product-image.service.js", () => ({
@@ -101,6 +103,16 @@ import type { CreateProductInput } from "@/modules/product/product.validators.js
 import { DEFAULT_VOUCHER_DESIGN } from "@/modules/coupon/voucher-design.js";
 
 const tenantId = "507f1f77bcf86cd799439011";
+const catalogTenant = {
+  _id: tenantId,
+  settings: { currency: "CZK" },
+  modules: {
+    payments: true,
+    bookings: true,
+    courses: true,
+    vouchers: true,
+  },
+};
 const userId = "507f1f77bcf86cd799439012";
 const locationId = "507f1f77bcf86cd799439013";
 const uploadedImage = {
@@ -206,16 +218,7 @@ describe("productService", () => {
       key: `tenants/${tenantId}/products/new.png`,
       url: `https://media.shario.test/tenants/${tenantId}/products/new.png`,
     });
-    mocks.getTenantOrThrow.mockResolvedValue({
-      _id: tenantId,
-      settings: { currency: "CZK" },
-      modules: {
-        payments: true,
-        bookings: true,
-        courses: true,
-        vouchers: true,
-      },
-    });
+    mocks.getTenantOrThrow.mockResolvedValue(catalogTenant);
     mocks.repository.list.mockResolvedValue([]);
     mocks.repository.findOne.mockResolvedValue(null);
     mocks.repository.count.mockResolvedValue(0);
@@ -312,6 +315,18 @@ describe("productService", () => {
     });
     expect(result.openStudioPolicy).toBeNull();
     expect(mocks.repository.update).toHaveBeenCalledWith(expect.objectContaining({ openStudioPolicy: null }));
+  });
+
+  it("reads the bounded public course page without counting the entire catalogue", async () => {
+    const locationId = "507f1f77bcf86cd799439012";
+    mocks.repository.list.mockResolvedValue([]);
+    await productService.listPublicCoursePage(catalogTenant as never, { locationId, page: 2, limit: 100 });
+    expect(mocks.repository.list).toHaveBeenCalledWith(expect.objectContaining({
+      page: 2, limit: 100, locationId, coursePublicationLocationId: locationId,
+      isActive: true, assignedStudioOnly: true,
+    }));
+    expect(mocks.repository.count).not.toHaveBeenCalled();
+    expect(mocks.getTenantOrThrow).not.toHaveBeenCalled();
   });
 
   it("scopes the public catalog to active, explicitly public product types", async () => {
@@ -1028,6 +1043,7 @@ describe("productService", () => {
     });
     mocks.repository.list.mockResolvedValue([product]);
     const result = await productService.listPublicVoucherProducts({ tenantId });
+    expect(mocks.repository.count).not.toHaveBeenCalled();
     expect(result).toHaveLength(1);
     expect(result[0]).toEqual({
       id: String(product._id),
@@ -1049,6 +1065,46 @@ describe("productService", () => {
       },
       isActive: true,
     });
+  });
+
+  it("prefers the catalog image and otherwise exposes only an owned design photo", async () => {
+    const photoKey = `tenants/${tenantId}/voucher-assets/cf2a9bfd-35ea-4a64-a366-04d8aee39f91.png`;
+    const design = {
+      ...structuredClone(DEFAULT_VOUCHER_DESIGN),
+      assets: { logoKey: null, imageKey: photoKey },
+    };
+    mocks.repository.list.mockResolvedValue([
+      productDocument({ kind: "voucher", type: "coupon", imageSrc: " https://cdn.example.test/catalog.jpg ", voucherDesign: design }),
+      productDocument({ kind: "voucher", type: "coupon", imageSrc: "   ", voucherDesign: design }),
+    ]);
+
+    const result = await productService.listPublicVoucherProducts({ tenantId });
+    expect(result.map((product) => product.imageSrc)).toEqual([
+      "https://cdn.example.test/catalog.jpg",
+      `https://media.shario.test/${photoKey}`,
+    ]);
+    for (const product of result) {
+      expect(product).not.toHaveProperty("voucherDesign");
+      expect(product).not.toHaveProperty("assets");
+      expect(product).not.toHaveProperty("imageKey");
+    }
+  });
+
+  it.each([
+    ["no design", null],
+    ["no photo", structuredClone(DEFAULT_VOUCHER_DESIGN)],
+    ["logo only", { ...structuredClone(DEFAULT_VOUCHER_DESIGN), assets: { logoKey: `tenants/${tenantId}/voucher-assets/cf2a9bfd-35ea-4a64-a366-04d8aee39f91.png`, imageKey: null } }],
+    ["another workspace", { ...structuredClone(DEFAULT_VOUCHER_DESIGN), assets: { logoKey: null, imageKey: `tenants/${userId}/voucher-assets/cf2a9bfd-35ea-4a64-a366-04d8aee39f91.png` } }],
+    ["non-design asset", { ...structuredClone(DEFAULT_VOUCHER_DESIGN), assets: { logoKey: null, imageKey: `tenants/${tenantId}/products/private.png` } }],
+    ["malformed design", { assets: { imageKey: `tenants/${tenantId}/voucher-assets/cf2a9bfd-35ea-4a64-a366-04d8aee39f91.png` } }],
+  ])("keeps a voucher text-only for %s", async (_label, voucherDesign) => {
+    mocks.repository.list.mockResolvedValue([
+      productDocument({ kind: "voucher", type: "coupon", imageSrc: "", voucherDesign }),
+    ]);
+    const result = await productService.listPublicVoucherProducts({ tenantId });
+    expect(result).toHaveLength(1);
+    expect(result[0].imageSrc).toBe("");
+    expect(result[0]).not.toHaveProperty("voucherDesign");
   });
 
   it("refuses to publish a voucher with a past custom expiry date", async () => {

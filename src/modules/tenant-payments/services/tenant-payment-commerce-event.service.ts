@@ -1,3 +1,4 @@
+import { reconcilePaymentRefundEvent } from "./payment-refund-reconciliation.service.js";
 import type Stripe from "stripe";
 
 import { stripeWebhookService } from "@/modules/checkout/services/checkout.stripe-webhook.service.js";
@@ -11,6 +12,7 @@ import { handleMembershipStripeEvent } from "@/modules/membership/services/membe
 export const handleTenantPaymentCommerceEvent = async (
   event: Stripe.Event,
 ): Promise<void> => {
+  await reconcilePaymentRefundEvent(event);
   if (await handleMembershipStripeEvent(event)) {
     return;
   }

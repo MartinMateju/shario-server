@@ -45,6 +45,7 @@ import {
   clearSetupPracticeConfirmation,
   confirmSetupPractice,
 } from "@/modules/setup-center/setup-center.service.js";
+import { legacyPracticeFingerprint } from "@/modules/setup-center/setup-practice-fingerprint.js";
 import TenantModel from "@/modules/tenants/tenant.model.js";
 import {
   clearTestDatabase,
@@ -296,6 +297,118 @@ describe("manual booking confirmation persistence", () => {
     });
     expect(after.practice).toEqual(before.practice);
     expect(await confirmationEvents()).toHaveLength(2);
+  });
+
+  it("keeps confirmation after ordinary booking capacity locks and unrelated edits", async () => {
+    const expectedReadinessFingerprint = await fingerprint();
+    await confirmSetupPractice({ ...context(), expectedReadinessFingerprint });
+    const before = await loadState();
+
+    // This is the same timestamped lock write used by checkout/rescheduling.
+    await LocationModel.updateOne(
+      { _id: locationId, tenant: tenantId },
+      { $inc: { "booking.capacityRevision": 1 } },
+    );
+    await Product.updateOne(
+      { _id: productId, tenant: tenantId },
+      { $set: { name: "Renamed studio booking" } },
+    );
+    const location = await LocationModel.findById(locationId).lean();
+    expect(location.updatedAt.getTime()).toBeGreaterThan(fixtureDate.getTime());
+    const reloaded = await buildSetupCenterSnapshot(context());
+    expect(reloaded.diagnostics.readinessFingerprint).toBe(
+      expectedReadinessFingerprint,
+    );
+    expect(reloaded.launchReview.testBooking).toMatchObject({
+      complete: true,
+      completionSource: "manual",
+      retestRecommended: false,
+    });
+    expect((await loadState()).practiceConfirmation).toEqual(
+      before.practiceConfirmation,
+    );
+
+    await LocationModel.updateOne(
+      { _id: locationId, tenant: tenantId },
+      { $set: { "booking.globalCapacity": 9 } },
+    );
+    const changed = await buildSetupCenterSnapshot(context());
+    expect(changed.launchReview.testBooking).toMatchObject({
+      complete: false,
+      retestRecommended: true,
+    });
+  });
+
+  it("upgrades current legacy evidence without changing who/when confirmed or simulated artifacts", async () => {
+    const legacyFingerprint = legacyPracticeFingerprint({
+      product: await Product.findById(productId).lean(),
+      location: await LocationModel.findById(locationId).lean(),
+    });
+    await SetupCenterStateModel.updateOne(
+      { tenant: tenantId },
+      {
+        $set: {
+          practiceConfirmation: {
+            confirmedAt: fixtureDate,
+            confirmedBy: actorId,
+            readinessFingerprint: legacyFingerprint,
+          },
+          "practice.readinessFingerprint": legacyFingerprint,
+        },
+      },
+    );
+    const before = await loadState();
+    const upgraded = await buildSetupCenterSnapshot(context());
+    const canonicalFingerprint = upgraded.diagnostics.readinessFingerprint;
+    expect(canonicalFingerprint).not.toBe(legacyFingerprint);
+    const stored = await loadState();
+    expect(stored.practiceConfirmation).toEqual({
+      ...before.practiceConfirmation,
+      readinessFingerprint: canonicalFingerprint,
+    });
+    expect(stored.practice).toEqual({
+      ...before.practice,
+      readinessFingerprint: canonicalFingerprint,
+    });
+    expect(await confirmationEvents()).toHaveLength(0);
+
+    await LocationModel.updateOne(
+      { _id: locationId, tenant: tenantId },
+      { $inc: { "booking.capacityRevision": 1 } },
+    );
+    expect(
+      (await buildSetupCenterSnapshot(context())).launchReview.testBooking
+        .complete,
+    ).toBe(true);
+  });
+
+  it("does not upgrade legacy evidence after its recorded configuration changed", async () => {
+    const legacyFingerprint = legacyPracticeFingerprint({
+      product: await Product.findById(productId).lean(),
+      location: await LocationModel.findById(locationId).lean(),
+    });
+    await SetupCenterStateModel.updateOne(
+      { tenant: tenantId },
+      {
+        $set: {
+          practiceConfirmation: {
+            confirmedAt: fixtureDate,
+            confirmedBy: actorId,
+            readinessFingerprint: legacyFingerprint,
+          },
+        },
+      },
+    );
+    await Product.updateOne(
+      { _id: productId, tenant: tenantId },
+      { $set: { price: 100 } },
+    );
+    const stale = await buildSetupCenterSnapshot(context());
+    expect(stale.practice.manualConfirmation.current).toBe(false);
+    expect((await loadState()).practiceConfirmation.readinessFingerprint).toBe(
+      legacyFingerprint,
+    );
+    expect(await confirmationEvents()).toHaveLength(0);
   });
 
   it("clears only the requested tenant's confirmation and makes concurrent undo idempotent", async () => {

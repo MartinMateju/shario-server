@@ -54,6 +54,15 @@ beforeEach(() => {
 });
 
 describe("voucher email tenant isolation and customization", () => {
+  it("uses the active primary domain instead of a retired purchase origin", async () => {
+    mocks.tenant.mockReturnValue(query({
+      _id: tenantId, slug: "common-ground", name: "Atelier Klei", plan: "studio_plus", planVersion: 3,
+      domains: [{ hostname: "booking.commonground.example", type: "custom", status: "active", isPrimary: true }],
+      settings: { publicDefaultLanguage: "cs" },
+    }));
+    await couponEmailService.prepareCustomerCouponOrderEmail({ order: { ...order, purchaseOriginSnapshot: "https://retired-domain.example" }, attachments: [] });
+    expect(mocks.accessUrl.mock.calls[0][0].purchaseOriginSnapshot).toBe("https://booking.commonground.example");
+  });
   it("includes the digital PDF backup and full destination for a postal purchase", async () => {
     const attachments = [{ filename: "gift.pdf", content: Buffer.from("PDF") }];
     const postalOrder = {

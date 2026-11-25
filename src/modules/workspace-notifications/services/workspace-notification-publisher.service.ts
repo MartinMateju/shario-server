@@ -160,6 +160,9 @@ const loadCandidateRecipients = async (
         : input.preferenceKey;
     const preferences = access.preferences.notifications;
     if (preferences.inApp === false) continue;
+    if (preferenceKey === "bookingCreated" && preferences.bookingCreated !== true) {
+      continue;
+    }
     if (preferenceKey && preferences[preferenceKey] === false) continue;
 
     recipients.push({ userId, preferences });

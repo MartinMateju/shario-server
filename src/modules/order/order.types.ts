@@ -260,6 +260,8 @@ export type Order = {
   note: string;
   isPaid: boolean;
   paidAt: Date | null;
+  refund?: import("@/modules/tenant-payments/payment-refund-reconciliation.model.js").RefundSummary | null;
+  refundReconciliationRevision?: number;
   creditPurchase: OrderCreditPurchase;
   credits: OrderCredits;
   membershipRedemption: OrderMembershipRedemption;

@@ -12,12 +12,14 @@ import { createBookingRepository } from "../booking.repository.js";
 import {
   listBookingHistory,
   listBookingsWithFilters,
+  listBookingFilterOptions,
   listCourseBookings,
   listUserBookings,
   listVisibleBookings,
 } from "../services/booking.read.service.js";
 import { listCustomerBookingsForWorkspace } from "../booking.customer.service.js";
 import { getAuthenticatedUserId } from "@/modules/auth/auth.utils.js";
+import { getResolvedWorkspaceAccess } from "@/modules/tenant-access/tenant-access.middleware.js";
 import {
   getAllowedWorkspaceLocationIds,
   resolveWorkspaceAccessForUser,
@@ -182,18 +184,59 @@ export const getUserBookings = asyncHandler(
   },
 );
 
+const getBookingDirectoryScope = (
+  req: Request,
+  requestedLocationId?: string,
+) => {
+  const access = getResolvedWorkspaceAccess(req);
+  const allowedLocationIds = getAllowedWorkspaceLocationIds(access);
+  if (
+    requestedLocationId &&
+    Array.isArray(allowedLocationIds) &&
+    !allowedLocationIds.includes(requestedLocationId)
+  ) {
+    notFound("Location not found.");
+  }
+  return { locationId: requestedLocationId, allowedLocationIds };
+};
+
+export const getBookingFilterOptions = asyncHandler(
+  async (req: Request, res: Response) => {
+    const query = z
+      .object({
+        locationId: z
+          .string()
+          .regex(/^[a-f0-9]{24}$/i)
+          .optional(),
+      })
+      .strict()
+      .safeParse(req.query);
+    if (!query.success) badRequest("Invalid booking filter options.");
+    res.json(
+      await listBookingFilterOptions({
+        tenantId: requireTenantId(req),
+        ...getBookingDirectoryScope(req, query.data.locationId),
+      }),
+    );
+  },
+);
+
 export const getBookingsWithFilters = asyncHandler(
   async (req: Request, res: Response) => {
     const tenantId = requireTenantId(req);
+    if (
+      req.body?.locationId !== undefined &&
+      typeof req.body.locationId !== "string"
+    ) {
+      badRequest("Invalid locationId.");
+    }
     const requestedLocationId =
       typeof req.body?.locationId === "string"
         ? req.body.locationId.trim()
         : undefined;
-    const scope = await getLocationScope(
-      req,
-      tenantId,
-      requestedLocationId,
-    );
+    // /filter is protected by viewBookings, which already resolves and checks
+    // workspace access. Reuse that trusted result rather than loading it again.
+    const scope = getBookingDirectoryScope(req, requestedLocationId);
 
     const result = await listBookingsWithFilters({
       tenantId,

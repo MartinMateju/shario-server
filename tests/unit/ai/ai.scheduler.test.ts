@@ -96,6 +96,7 @@ const access = (tenant = TENANT_A): ResolvedWorkspaceAccess => ({
     defaultLandingPage: "",
     contextualGuides: {},
     notifications: {
+      bookingCreated: false,
       bookingAssigned: true,
       bookingCancelled: true,
       taskAssigned: true,

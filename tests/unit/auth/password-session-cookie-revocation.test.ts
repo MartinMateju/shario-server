@@ -7,6 +7,11 @@ const mocks = vi.hoisted(() => ({
   updateCurrentAccountPassword: vi.fn(),
   updateLegacyUserPassword: vi.fn(),
   accountPasswordParse: vi.fn(),
+  requestContext: vi.fn(),
+}));
+
+vi.mock("@/modules/auth/auth-first-party-proxy.js", () => ({
+  resolveAuthRequestContext: mocks.requestContext,
 }));
 
 vi.mock("@/modules/auth/auth.utils.js", () => ({
@@ -99,6 +104,7 @@ const expectBothAuthCookiesCleared = (
 describe("password security-event cookie cleanup", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.requestContext.mockReset().mockResolvedValue({ origin: ORIGIN, firstPartyProxy: false });
     mocks.getAuthenticatedUserId.mockReturnValue(USER_ID);
     mocks.requireTenantId.mockReturnValue(TENANT_ID);
     mocks.getRefreshCookieCleanupOptions.mockReturnValue([
@@ -173,5 +179,33 @@ describe("password security-event cookie cleanup", () => {
     expect(res.json).toHaveBeenCalledWith({
       message: "Password was updated",
     });
+  });
+
+  it.each([
+    ["account", updateAccountPassword],
+    ["legacy", updateLegacyUserPassword],
+  ])("clears first-party custom-domain cookies after a %s password change", async (_name, controller) => {
+    mocks.requestContext.mockResolvedValue({ origin: "https://booking.commonground.example", firstPartyProxy: true });
+    const res = createResponse();
+    const next = vi.fn();
+    await controller({ body: PASSWORD_BODY } as never, res as never, next);
+    expect(next).not.toHaveBeenCalled();
+    expect(mocks.getRefreshCookieCleanupOptions).toHaveBeenCalledWith("https://booking.commonground.example", { firstPartyProxy: true });
+    expectBothAuthCookiesCleared(res.clearCookie);
+  });
+
+  it.each([
+    ["account", updateAccountPassword],
+    ["legacy", updateLegacyUserPassword],
+  ])("rejects an invalid proxy signature before the %s password mutation", async (_name, controller) => {
+    const error = new Error("Invalid first-party proxy request");
+    mocks.requestContext.mockRejectedValue(error);
+    const res = createResponse();
+    const next = vi.fn();
+    await controller({ body: PASSWORD_BODY } as never, res as never, next);
+    expect(next).toHaveBeenCalledWith(error);
+    expect(mocks.updateCurrentAccountPassword).not.toHaveBeenCalled();
+    expect(mocks.updateLegacyUserPassword).not.toHaveBeenCalled();
+    expect(res.clearCookie).not.toHaveBeenCalled();
   });
 });

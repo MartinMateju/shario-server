@@ -10,6 +10,7 @@ const mediaUrls = (site: TenantPublicSite): Set<string> =>
       site.branding?.coverImageUrl,
       site.login?.backgroundImageUrl,
       site.register?.backgroundImageUrl,
+      ...Object.values(site.customerPortal?.pageImages ?? {}),
       ...(site.customerPortal?.courses?.locations ?? []).map(entry => entry.heroImageUrl),
     ].filter(Boolean),
   );
@@ -71,7 +72,7 @@ export const cleanupDiscardedPublicSiteMedia = async ({
       tenant: tenantId,
     })
       .select(
-        "snapshot.branding.logoUrl snapshot.branding.faviconUrl snapshot.branding.coverImageUrl snapshot.login.backgroundImageUrl snapshot.register.backgroundImageUrl snapshot.customerPortal.courses.locations.heroImageUrl",
+        "snapshot.branding.logoUrl snapshot.branding.faviconUrl snapshot.branding.coverImageUrl snapshot.login.backgroundImageUrl snapshot.register.backgroundImageUrl snapshot.customerPortal.pageImages snapshot.customerPortal.courses.locations.heroImageUrl",
       )
       .lean()
       .exec();
